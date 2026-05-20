@@ -60,4 +60,12 @@ wait "${WATCH_PID}" >/dev/null 2>&1 || true
 "${BIN}" response "${REQ_ID}" | grep -q '"decision":"approve"'
 "${BIN}" events | grep -q "request.answered"
 
+MSG_ID="$("${BIN}" message \
+  --title "Smoke note" \
+  --body "A human-authored note from Android/CLI." \
+  --tag ops \
+  --tag "#follow-up" \
+  --json | jq -r '.id')"
+"${BIN}" show --json "${MSG_ID}" | jq -e '.kind == "message" and (.tags == ["ops", "follow-up"])' >/dev/null
+
 echo "wickle smoke passed: ${REQ_ID}"

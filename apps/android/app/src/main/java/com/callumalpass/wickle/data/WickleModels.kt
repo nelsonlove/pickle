@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 @Serializable
 data class WickleRequest(
@@ -15,6 +16,7 @@ data class WickleRequest(
   val schema: JsonObject = JsonObject(emptyMap()),
   val status: String,
   val priority: String = "normal",
+  val tags: List<String> = emptyList(),
   val links: List<WickleLink> = emptyList(),
   val metadata: JsonElement? = null,
   @SerialName("created_at") val createdAt: String,
@@ -47,3 +49,25 @@ data class WickleEvent(
 )
 
 @Serializable data class SubmitResponseRequest(val responder: String, val payload: JsonElement)
+
+@Serializable
+data class CreateRequestPayload(
+  val source: String,
+  val kind: String,
+  val title: String,
+  val body: String = "",
+  val schema: JsonObject = defaultMessageSchema(),
+  val priority: String = "normal",
+  val tags: List<String> = emptyList(),
+  val links: List<WickleLink> = emptyList(),
+  val metadata: JsonObject = JsonObject(emptyMap()),
+)
+
+fun defaultMessageSchema(): JsonObject =
+  JsonObject(
+    mapOf(
+      "type" to JsonPrimitive("object"),
+      "properties" to JsonObject(emptyMap()),
+      "additionalProperties" to JsonPrimitive(true),
+    ),
+  )

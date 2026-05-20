@@ -28,8 +28,24 @@ class WickleSettings(context: Context) {
     flow.value = load()
   }
 
+  fun isPushEnabled(): Boolean = prefs.getBoolean(KEY_PUSH_ENABLED, false)
+
+  fun setPushEnabled(enabled: Boolean) {
+    prefs.edit().putBoolean(KEY_PUSH_ENABLED, enabled).apply()
+  }
+
+  fun lastEventId(): Long = prefs.getLong(KEY_LAST_EVENT_ID, 0L)
+
+  fun setLastEventId(id: Long) {
+    if (id > lastEventId()) {
+      prefs.edit().putLong(KEY_LAST_EVENT_ID, id).apply()
+    }
+  }
+
   companion object {
     private const val KEY_SERVER_URL = "server_url"
     private const val KEY_TOKEN = "token"
+    private const val KEY_PUSH_ENABLED = "push_enabled"
+    private const val KEY_LAST_EVENT_ID = "last_event_id"
   }
 }

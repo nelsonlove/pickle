@@ -11,6 +11,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.callumalpass.wickle.MainActivity
 import com.callumalpass.wickle.R
+import com.callumalpass.wickle.data.ConnectionSettings
 import com.callumalpass.wickle.data.WickleApi
 import com.callumalpass.wickle.data.WickleEvent
 import com.callumalpass.wickle.data.WickleSettings
@@ -23,6 +24,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -39,17 +43,21 @@ class WickleRealtimeService : Service() {
   private val running = AtomicBoolean(false)
   private var job: Job? = null
   private var socket: WebSocket? = null
+  private lateinit var settingsStore: WickleSettings
 
   override fun onCreate() {
     super.onCreate()
+    settingsStore = WickleSettings(applicationContext)
     ensureChannels()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
+      settingsStore.setPushEnabled(false)
       stopSelf()
       return START_NOT_STICKY
     }
+    settingsStore.setPushEnabled(true)
     startForeground(SERVICE_NOTIFICATION_ID, serviceNotification("Connecting"))
     if (running.compareAndSet(false, true)) {
       job = scope.launch { runLoop() }
@@ -70,7 +78,7 @@ class WickleRealtimeService : Service() {
     var backoffMs = 1000L
     while (running.get()) {
       val closed = kotlinx.coroutines.CompletableDeferred<Unit>()
-      val settings = WickleSettings(applicationContext).load()
+      val settings = settingsStore.load()
       socket =
         client.newWebSocket(
           api.streamRequest(settings),
@@ -78,6 +86,7 @@ class WickleRealtimeService : Service() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
               backoffMs = 1000L
               notifyService("Connected")
+              scope.launch { catchUp(settings) }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -104,13 +113,47 @@ class WickleRealtimeService : Service() {
   private fun handleMessage(text: String) {
     if (text.contains("stream.ready")) return
     val event = runCatching { json.decodeFromString<WickleEvent>(text) }.getOrNull() ?: return
-    if (event.type == "request.created") {
-      val title =
-        event.payload
-          ?.let { payload -> payload.toString().substringAfter("\"title\":\"", "").substringBefore("\"", "New Wickle request") }
-          ?: "New Wickle request"
-      postRequestNotification(title, event.requestId)
+    processEvent(event, notify = true)
+  }
+
+  private suspend fun catchUp(settings: ConnectionSettings) {
+    val startingAfter = settingsStore.lastEventId()
+    var after = startingAfter
+    val shouldNotify = startingAfter > 0L
+    repeat(MAX_CATCHUP_PAGES) {
+      val events = runCatching { api.events(settings, after, CATCHUP_LIMIT) }.getOrElse { error ->
+        notifyService("Catch-up failed: ${error.message ?: "events unavailable"}")
+        return
+      }
+      if (events.isEmpty()) return
+      for (event in events) {
+        processEvent(event, notify = shouldNotify)
+        after = maxOf(after, event.id)
+      }
+      if (events.size < CATCHUP_LIMIT) return
     }
+  }
+
+  private fun processEvent(event: WickleEvent, notify: Boolean) {
+    if (event.id <= settingsStore.lastEventId()) return
+    settingsStore.setLastEventId(event.id)
+    if (notify && event.type == "request.created") {
+      postRequestNotification(notificationTitle(event), notificationBody(event), event.requestId)
+    }
+  }
+
+  private fun notificationTitle(event: WickleEvent): String {
+    val payload = event.payload as? JsonObject
+    val title = payload?.get("title")?.jsonPrimitive?.contentOrNull ?: "New Wickle request"
+    val kind = payload?.get("kind")?.jsonPrimitive?.contentOrNull
+    return if (kind == "message") "Wickle message: $title" else title
+  }
+
+  private fun notificationBody(event: WickleEvent): String {
+    val payload = event.payload as? JsonObject
+    val source = payload?.get("source")?.jsonPrimitive?.contentOrNull
+    val kind = payload?.get("kind")?.jsonPrimitive?.contentOrNull
+    return listOfNotNull(source, kind, event.requestId).joinToString(" / ").ifBlank { event.requestId ?: "Pending request" }
   }
 
   private fun notifyService(state: String) {
@@ -128,13 +171,13 @@ class WickleRealtimeService : Service() {
       .setPriority(NotificationCompat.PRIORITY_LOW)
       .build()
 
-  private fun postRequestNotification(title: String, requestId: String?) {
+  private fun postRequestNotification(title: String, body: String, requestId: String?) {
     val manager = getSystemService(NotificationManager::class.java)
     val notification =
       NotificationCompat.Builder(this, CHANNEL_REQUESTS)
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle(title)
-        .setContentText(requestId ?: "Pending request")
+        .setContentText(body)
         .setContentIntent(mainPendingIntent())
         .setAutoCancel(true)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -159,6 +202,8 @@ class WickleRealtimeService : Service() {
     private const val CHANNEL_SERVICE = "wickle_service"
     private const val CHANNEL_REQUESTS = "wickle_requests"
     private const val SERVICE_NOTIFICATION_ID = 101
+    private const val CATCHUP_LIMIT = 100
+    private const val MAX_CATCHUP_PAGES = 10
 
     fun start(context: Context) {
       val intent = Intent(context, WickleRealtimeService::class.java)

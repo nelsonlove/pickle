@@ -14,8 +14,12 @@ private val DarkColorScheme =
     tertiary = Reject,
     background = Charcoal,
     surface = DarkSurface,
+    primaryContainer = Color(0xFF244C3B),
+    secondaryContainer = Color(0xFF273D56),
     onBackground = Paper,
     onSurface = Paper,
+    onPrimaryContainer = Paper,
+    onSecondaryContainer = Paper,
   )
 
 private val LightColorScheme =
@@ -24,12 +28,16 @@ private val LightColorScheme =
     secondary = Hold,
     tertiary = Reject,
     background = Paper,
-    surface = Color(0xFFFBF7EF),
-    surfaceVariant = Color(0xFFEDE3D3),
+    surface = Color(0xFFFFFCF8),
+    surfaceVariant = Color(0xFFEAF0E6),
+    primaryContainer = Color(0xFFDDEFE5),
+    secondaryContainer = Color(0xFFE4EEF8),
     outline = Line,
     onBackground = Ink,
     onSurface = Ink,
     onSurfaceVariant = MutedInk,
+    onPrimaryContainer = Color(0xFF173927),
+    onSecondaryContainer = Color(0xFF20354E),
   )
 
 @Composable

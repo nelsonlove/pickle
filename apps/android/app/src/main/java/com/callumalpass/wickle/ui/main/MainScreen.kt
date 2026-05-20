@@ -6,12 +6,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,59 +16,57 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.Inbox
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ElevatedButton
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.callumalpass.wickle.data.ConnectionSettings
-import com.callumalpass.wickle.data.WickleLink
 import com.callumalpass.wickle.data.WickleRequest
+import com.callumalpass.wickle.data.WickleUiState
 import com.callumalpass.wickle.realtime.WickleRealtimeService
 import com.callumalpass.wickle.theme.WickleTheme
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 
 @Composable
 fun MainScreen(
@@ -81,14 +76,19 @@ fun MainScreen(
   val state by viewModel.uiState.collectAsStateWithLifecycle()
   val context = LocalContext.current
   val notificationLauncher =
-    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-      WickleRealtimeService.start(context)
+    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      if (granted) {
+        WickleRealtimeService.start(context)
+        viewModel.setPushEnabled(true)
+      } else {
+        viewModel.setPushEnabled(false)
+      }
     }
 
   LaunchedEffect(Unit) { viewModel.refresh() }
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
 
-  WickleInbox(
+  WickleApp(
     state = state,
     onRefresh = viewModel::refresh,
     onSelect = viewModel::select,
@@ -99,17 +99,23 @@ fun MainScreen(
         notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
       } else {
         WickleRealtimeService.start(context)
+        viewModel.setPushEnabled(true)
       }
     },
-    onStopRealtime = { WickleRealtimeService.stop(context) },
+    onStopRealtime = {
+      WickleRealtimeService.stop(context)
+      viewModel.setPushEnabled(false)
+    },
     onRespond = viewModel::respond,
-    modifier = modifier.safeDrawingPadding(),
+    onSendMessage = viewModel::sendMessage,
+    onNoticeShown = viewModel::clearNotice,
+    modifier = modifier,
   )
 }
 
 @Composable
-private fun WickleInbox(
-  state: com.callumalpass.wickle.data.WickleUiState,
+fun WickleApp(
+  state: WickleUiState,
   onRefresh: () -> Unit,
   onSelect: (WickleRequest) -> Unit,
   onSaveSettings: (ConnectionSettings) -> Unit,
@@ -117,327 +123,224 @@ private fun WickleInbox(
   onStartRealtime: () -> Unit,
   onStopRealtime: () -> Unit,
   onRespond: (WickleRequest, JsonElement) -> Unit,
+  onSendMessage: (String, String, List<String>, () -> Unit) -> Unit,
+  onNoticeShown: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
-  BoxWithConstraints(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-    val compact = maxWidth < 760.dp
-    Column(
-      modifier = Modifier.fillMaxSize().padding(if (compact) 14.dp else 18.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
+  var route by rememberSaveable { mutableStateOf(WickleRoute.Inbox.name) }
+  val snackbarHostState = remember { SnackbarHostState() }
+  val selected = state.selected ?: state.requests.firstOrNull()
+
+  LaunchedEffect(state.notice, state.error) {
+    val message = state.notice ?: state.error
+    if (!message.isNullOrBlank()) {
+      snackbarHostState.showSnackbar(message)
+      onNoticeShown()
+    }
+  }
+
+  Scaffold(
+    modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+    snackbarHost = { SnackbarHost(snackbarHostState) },
+    topBar = {
+      WickleTopBar(
+        route = route,
+        pendingCount = state.requests.size,
+        connected = state.connected,
+        onBack = { route = WickleRoute.Inbox.name },
+        onRefresh = onRefresh,
+        onStartRealtime = onStartRealtime,
+      )
+    },
+    bottomBar = {
+      WickleBottomBar(
+        route = route,
+        onNavigate = { route = it.name },
+      )
+    },
+  ) { padding ->
+    Box(
+      modifier =
+        Modifier
+          .fillMaxSize()
+          .padding(padding)
+          .safeDrawingPadding()
+          .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-      Header(state.connected, compact, onRefresh, onStartRealtime, onStopRealtime)
-      ConnectionPanel(state.settings, state.error, compact, onSaveSettings, onTestConnection)
-      if (compact) {
-        Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-          RequestList(state.requests, state.selected?.id, onSelect, Modifier.fillMaxWidth().height(260.dp))
-          RequestDetail(state.selected, onRespond, Modifier.fillMaxWidth().weight(1f))
-        }
-      } else {
-        Row(modifier = Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-          RequestList(state.requests, state.selected?.id, onSelect, Modifier.weight(0.92f).fillMaxSize())
-          RequestDetail(state.selected, onRespond, Modifier.weight(1.08f).fillMaxSize())
-        }
+      when (route) {
+        WickleRoute.Detail.name ->
+          DetailPage(
+            request = selected,
+            onBack = { route = WickleRoute.Inbox.name },
+            onRespond = { request, payload ->
+              onRespond(request, payload)
+              route = WickleRoute.Inbox.name
+            },
+          )
+
+        WickleRoute.Compose.name ->
+          ComposePage(
+            sending = state.sending,
+            onSend = { title, body, tags ->
+              onSendMessage(title, body, tags) {
+                route = WickleRoute.Inbox.name
+              }
+            },
+          )
+
+        WickleRoute.Settings.name ->
+          SettingsPage(
+            settings = state.settings,
+            connected = state.connected,
+            pushEnabled = state.pushEnabled,
+            error = state.error,
+            onSave = onSaveSettings,
+            onTest = onTestConnection,
+            onStartRealtime = onStartRealtime,
+            onStopRealtime = onStopRealtime,
+          )
+
+        else ->
+          InboxPage(
+            requests = state.requests,
+            loading = state.loading,
+            onRefresh = onRefresh,
+            onOpen = { request ->
+              onSelect(request)
+              route = WickleRoute.Detail.name
+            },
+          )
       }
     }
   }
 }
 
+private enum class WickleRoute(val label: String) {
+  Inbox("Inbox"),
+  Compose("Post"),
+  Settings("Settings"),
+  Detail("Detail"),
+}
+
 @Composable
-private fun Header(
+private fun WickleTopBar(
+  route: String,
+  pendingCount: Int,
   connected: Boolean?,
-  compact: Boolean,
+  onBack: () -> Unit,
   onRefresh: () -> Unit,
   onStartRealtime: () -> Unit,
-  onStopRealtime: () -> Unit,
 ) {
-  if (compact) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(modifier = Modifier.weight(1f)) {
-          Text("Wickle", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
-          Text("Agent inbox", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        StatusPill(connected)
-      }
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(onClick = onRefresh, shape = RoundedCornerShape(7.dp), modifier = Modifier.weight(1f)) { Text("Refresh") }
-        Button(onClick = onStartRealtime, shape = RoundedCornerShape(7.dp), modifier = Modifier.weight(1f)) { Text("Push") }
-        TextButton(onClick = onStopRealtime) { Text("Stop") }
-      }
-    }
-  } else {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-      Column(modifier = Modifier.weight(1f)) {
-        Text("Wickle", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
-        Text("Agent inbox", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-      }
-      StatusPill(connected)
-      Spacer(Modifier.width(10.dp))
-      OutlinedButton(onClick = onRefresh, shape = RoundedCornerShape(7.dp)) { Text("Refresh") }
-      Spacer(Modifier.width(8.dp))
-      Button(onClick = onStartRealtime, shape = RoundedCornerShape(7.dp)) { Text("Push") }
-      Spacer(Modifier.width(6.dp))
-      TextButton(onClick = onStopRealtime) { Text("Stop") }
-    }
-  }
-}
-
-@Composable
-private fun StatusPill(connected: Boolean?) {
-  val text = when (connected) {
-    true -> "Connected"
-    false -> "Offline"
-    null -> "Idle"
-  }
-  Surface(
-    shape = RoundedCornerShape(999.dp),
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-    color = MaterialTheme.colorScheme.surface,
-  ) {
-    Text(text, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium)
-  }
-}
-
-@Composable
-private fun ConnectionPanel(
-  settings: ConnectionSettings,
-  error: String?,
-  compact: Boolean,
-  onSave: (ConnectionSettings) -> Unit,
-  onTest: () -> Unit,
-) {
-  var serverUrl by remember(settings.serverUrl) { mutableStateOf(settings.serverUrl) }
-  var token by remember(settings.token) { mutableStateOf(settings.token) }
-  Surface(
-    modifier = Modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(8.dp),
-    color = MaterialTheme.colorScheme.surface,
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-  ) {
-    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      if (compact) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-          OutlinedTextField(value = serverUrl, onValueChange = { serverUrl = it }, label = { Text("Server") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-          OutlinedTextField(value = token, onValueChange = { token = it }, label = { Text("Token") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-          Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ElevatedButton(onClick = { onSave(ConnectionSettings(serverUrl, token)) }, shape = RoundedCornerShape(7.dp), modifier = Modifier.weight(1f)) { Text("Save") }
-            OutlinedButton(onClick = onTest, shape = RoundedCornerShape(7.dp), modifier = Modifier.weight(1f)) { Text("Test") }
-          }
+  val isDetail = route == WickleRoute.Detail.name
+  Surface(color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
+    Row(
+      modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      if (isDetail) {
+        IconButton(onClick = onBack) {
+          Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
         }
       } else {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-          OutlinedTextField(
-            value = serverUrl,
-            onValueChange = { serverUrl = it },
-            label = { Text("Server") },
-            singleLine = true,
-            modifier = Modifier.weight(1.2f),
-          )
-          OutlinedTextField(
-            value = token,
-            onValueChange = { token = it },
-            label = { Text("Token") },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-          )
-          ElevatedButton(onClick = { onSave(ConnectionSettings(serverUrl, token)) }, shape = RoundedCornerShape(7.dp)) { Text("Save") }
-          OutlinedButton(onClick = onTest, shape = RoundedCornerShape(7.dp)) { Text("Test") }
-        }
+        WickleMark()
       }
-      if (error != null) {
-        Text(error, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = if (isDetail) "Detail" else "Wickle",
+          style = MaterialTheme.typography.titleLarge,
+          fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+          text = if (isDetail) "Structured handoff" else "$pendingCount pending",
+          style = MaterialTheme.typography.labelMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      ConnectionDot(connected)
+      IconButton(onClick = onRefresh) {
+        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
+      }
+      IconButton(onClick = onStartRealtime) {
+        Icon(Icons.Rounded.Notifications, contentDescription = "Start push")
       }
     }
   }
 }
 
 @Composable
-private fun RequestList(
-  requests: List<WickleRequest>,
-  selectedId: String?,
-  onSelect: (WickleRequest) -> Unit,
-  modifier: Modifier = Modifier,
-) {
+private fun WickleBottomBar(route: String, onNavigate: (WickleRoute) -> Unit) {
+  NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+    NavigationBarItem(
+      modifier = Modifier.semantics { contentDescription = "Inbox tab" },
+      selected = route == WickleRoute.Inbox.name || route == WickleRoute.Detail.name,
+      onClick = { onNavigate(WickleRoute.Inbox) },
+      icon = { Icon(Icons.Rounded.Inbox, contentDescription = null) },
+      label = { Text(WickleRoute.Inbox.label) },
+    )
+    NavigationBarItem(
+      modifier = Modifier.semantics { contentDescription = "Post tab" },
+      selected = route == WickleRoute.Compose.name,
+      onClick = { onNavigate(WickleRoute.Compose) },
+      icon = { Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null) },
+      label = { Text(WickleRoute.Compose.label) },
+    )
+    NavigationBarItem(
+      modifier = Modifier.semantics { contentDescription = "Settings tab" },
+      selected = route == WickleRoute.Settings.name,
+      onClick = { onNavigate(WickleRoute.Settings) },
+      icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
+      label = { Text(WickleRoute.Settings.label) },
+    )
+  }
+}
+
+@Composable
+private fun WickleMark(modifier: Modifier = Modifier) {
   Surface(
-    modifier = modifier,
+    modifier = modifier.height(42.dp),
     shape = RoundedCornerShape(8.dp),
-    color = MaterialTheme.colorScheme.surface,
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    color = MaterialTheme.colorScheme.primary,
+    shadowElevation = 0.dp,
   ) {
-    Column {
-      Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("Pending", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        Text("${requests.size}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-      }
-      LazyColumn {
-        items(requests, key = { it.id }) { request ->
-          RequestRow(request, selected = request.id == selectedId, onClick = { onSelect(request) })
-        }
-      }
+    Row(
+      modifier = Modifier.padding(horizontal = 10.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      MiniPost(Color.White.copy(alpha = 0.95f), 18.dp)
+      MiniPost(MaterialTheme.colorScheme.secondary, 24.dp)
+      MiniPost(Color.White.copy(alpha = 0.95f), 18.dp)
     }
   }
 }
 
 @Composable
-private fun RequestRow(request: WickleRequest, selected: Boolean, onClick: () -> Unit) {
-  val color = if (selected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
-  Column(
-    modifier = Modifier.fillMaxWidth().background(color).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
-    verticalArrangement = Arrangement.spacedBy(5.dp),
-  ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      Text(request.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-      Text(request.priority, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    Text("${request.source} · ${request.kind}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun MiniPost(color: Color, height: androidx.compose.ui.unit.Dp) {
+  Surface(modifier = Modifier.height(height).padding(vertical = 3.dp), color = color, shape = RoundedCornerShape(6.dp)) {
+    Spacer(Modifier.padding(horizontal = 4.dp))
   }
 }
 
 @Composable
-private fun RequestDetail(
-  request: WickleRequest?,
-  onRespond: (WickleRequest, JsonElement) -> Unit,
-  modifier: Modifier = Modifier,
-) {
-  Surface(
-    modifier = modifier,
-    shape = RoundedCornerShape(8.dp),
-    color = MaterialTheme.colorScheme.surface,
-    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-  ) {
-    if (request == null) {
-      Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("No pending requests", color = MaterialTheme.colorScheme.onSurfaceVariant)
-      }
-    } else {
-      Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-      ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-          Text(request.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-          Text("${request.source} · ${request.createdAt}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (request.body.isNotBlank()) {
-          Text(request.body, style = MaterialTheme.typography.bodyLarge)
-        }
-        LinkBlock(request.links)
-        ResponseForm(request, onRespond)
-      }
+private fun ConnectionDot(connected: Boolean?) {
+  val color =
+    when (connected) {
+      true -> MaterialTheme.colorScheme.primary
+      false -> MaterialTheme.colorScheme.tertiary
+      null -> MaterialTheme.colorScheme.outline
     }
-  }
+  Box(modifier = Modifier.height(12.dp).clip(CircleShape).background(color).padding(horizontal = 6.dp))
 }
 
+@Preview(showBackground = true, widthDp = 390, heightDp = 820)
 @Composable
-private fun LinkBlock(links: List<WickleLink>) {
-  if (links.isEmpty()) return
-  Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-    Text("Links", style = MaterialTheme.typography.labelLarge)
-    links.forEach { link ->
-      Text("${link.label}: ${link.url ?: link.path}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-    }
-  }
-}
-
-@Composable
-private fun ResponseForm(request: WickleRequest, onRespond: (WickleRequest, JsonElement) -> Unit) {
-  val values = remember(request.id) { mutableStateMapOf<String, String>() }
-  val properties = request.schema["properties"]?.jsonObject ?: JsonObject(emptyMap())
-  val required = request.schema["required"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }?.toSet() ?: emptySet()
-
-  Card(
-    shape = RoundedCornerShape(8.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-  ) {
-    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-      Text("Response", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-      properties.forEach { (name, raw) ->
-        val property = raw.jsonObject
-        val enumValues = property["enum"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
-        val type = property["type"]?.jsonPrimitive?.contentOrNull ?: "string"
-        FieldEditor(name, type, enumValues, required.contains(name), values)
-      }
-      if (properties.isEmpty()) {
-        FieldEditor("decision", "string", listOf("approve", "reject", "revise"), true, values)
-      }
-      Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Button(
-          onClick = { onRespond(request, buildPayload(request.schema, values)) },
-          shape = RoundedCornerShape(7.dp),
-        ) {
-          Text("Submit")
-        }
-        OutlinedButton(
-          onClick = {
-            values["decision"] = "reject"
-            onRespond(request, buildPayload(request.schema, values))
-          },
-          shape = RoundedCornerShape(7.dp),
-        ) {
-          Text("Reject")
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun FieldEditor(
-  name: String,
-  type: String,
-  enumValues: List<String>,
-  required: Boolean,
-  values: MutableMap<String, String>,
-) {
-  Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-    Text(if (required) "$name *" else name, style = MaterialTheme.typography.labelLarge)
-    if (enumValues.isNotEmpty()) {
-      FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        enumValues.forEach { option ->
-          FilterChip(selected = values[name] == option, onClick = { values[name] = option }, label = { Text(option) })
-        }
-      }
-    } else if (type == "boolean") {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = values[name].toBoolean(), onCheckedChange = { values[name] = it.toString() })
-        Text(if (values[name].toBoolean()) "Yes" else "No")
-      }
-    } else {
-      OutlinedTextField(
-        value = values[name].orEmpty(),
-        onValueChange = { values[name] = it },
-        singleLine = false,
-        minLines = if (name.contains("comment", ignoreCase = true)) 3 else 1,
-        modifier = Modifier.fillMaxWidth(),
-      )
-    }
-  }
-}
-
-private fun buildPayload(schema: JsonObject, values: Map<String, String>): JsonElement {
-  val properties = schema["properties"]?.jsonObject ?: JsonObject(mapOf("decision" to JsonObject(emptyMap())))
-  return buildJsonObject {
-    properties.forEach { (name, raw) ->
-      val property = raw as? JsonObject ?: JsonObject(emptyMap())
-      val type = property["type"]?.jsonPrimitive?.contentOrNull ?: "string"
-      val value = values[name].orEmpty()
-      when (type) {
-        "boolean" -> put(name, JsonPrimitive(value.toBooleanStrictOrNull() ?: false))
-        "integer" -> put(name, JsonPrimitive(value.toLongOrNull() ?: 0L))
-        "number" -> put(name, JsonPrimitive(value.toDoubleOrNull() ?: 0.0))
-        else -> put(name, JsonPrimitive(value))
-      }
-    }
-  }
-}
-
-@Preview(showBackground = true, widthDp = 980)
-@Composable
-fun WickleInboxPreview() {
+fun WickleAppPreview() {
   WickleTheme {
-    WickleInbox(
+    WickleApp(
       state =
-        com.callumalpass.wickle.data.WickleUiState(
+        WickleUiState(
+          connected = true,
           requests =
             listOf(
               WickleRequest(
@@ -460,11 +363,12 @@ fun WickleInboxPreview() {
                     ),
                   ),
                 status = "pending",
+                priority = "normal",
+                tags = listOf("ops", "review"),
                 createdAt = "2026-05-20T21:50:00Z",
                 updatedAt = "2026-05-20T21:50:00Z",
               ),
             ),
-          selected = null,
         ),
       onRefresh = {},
       onSelect = {},
@@ -473,6 +377,8 @@ fun WickleInboxPreview() {
       onStartRealtime = {},
       onStopRealtime = {},
       onRespond = { _, _ -> },
+      onSendMessage = { _, _, _, done -> done() },
+      onNoticeShown = {},
     )
   }
 }

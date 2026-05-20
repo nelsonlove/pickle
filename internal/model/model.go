@@ -14,6 +14,11 @@ const (
 	EventRequestAnswered = "request.answered"
 )
 
+const (
+	KindApproval = "approval"
+	KindMessage  = "message"
+)
+
 type Link struct {
 	Label string `json:"label"`
 	URL   string `json:"url,omitempty"`
@@ -29,6 +34,7 @@ type Request struct {
 	Schema     json.RawMessage `json:"schema"`
 	Status     string          `json:"status"`
 	Priority   string          `json:"priority"`
+	Tags       []string        `json:"tags"`
 	Links      []Link          `json:"links"`
 	Metadata   json.RawMessage `json:"metadata"`
 	DedupeKey  string          `json:"dedupe_key,omitempty"`
@@ -45,6 +51,7 @@ type CreateRequest struct {
 	Body      string          `json:"body"`
 	Schema    json.RawMessage `json:"schema"`
 	Priority  string          `json:"priority"`
+	Tags      []string        `json:"tags"`
 	Links     []Link          `json:"links"`
 	Metadata  json.RawMessage `json:"metadata"`
 	DedupeKey string          `json:"dedupe_key,omitempty"`

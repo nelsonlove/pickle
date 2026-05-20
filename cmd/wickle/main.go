@@ -42,6 +42,8 @@ func run(args []string) error {
 		return cmdServe(args[1:])
 	case "ask":
 		return cmdAsk(args[1:])
+	case "message":
+		return cmdMessage(args[1:])
 	case "inbox", "list":
 		return cmdInbox(args[1:])
 	case "show":
@@ -143,7 +145,9 @@ func cmdAsk(args []string) error {
 	dedupe := fs.String("dedupe-key", "", "dedupe key")
 	metadataFile := fs.String("metadata", "", "metadata JSON file")
 	links := multiFlag{}
+	tags := multiFlag{}
 	fs.Var(&links, "link", "link as label=url or label=/path")
+	fs.Var(&tags, "tag", "tag to attach; repeatable")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -197,9 +201,60 @@ func cmdAsk(args []string) error {
 		Body:      bodyText,
 		Schema:    schema,
 		Priority:  *priority,
+		Tags:      parseTags(tags),
 		Links:     parseLinks(links),
 		Metadata:  metadata,
 		DedupeKey: *dedupe,
+	})
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		return printJSON(req)
+	}
+	fmt.Println(req.ID)
+	return nil
+}
+
+func cmdMessage(args []string) error {
+	fs := flag.NewFlagSet("message", flag.ContinueOnError)
+	title := fs.String("title", "", "message title")
+	body := fs.String("body", "", "message body")
+	bodyFile := fs.String("body-file", "", "file to read message body from")
+	tags := multiFlag{}
+	fs.Var(&tags, "tag", "tag to attach; repeatable")
+	jsonOut := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *title == "" {
+		return fmt.Errorf("--title is required")
+	}
+	bodyText := *body
+	if *bodyFile != "" {
+		b, err := os.ReadFile(*bodyFile)
+		if err != nil {
+			return err
+		}
+		bodyText = string(b)
+	}
+	cfg, _, err := config.Ensure()
+	if err != nil {
+		return err
+	}
+	st, err := store.Open(cfg.DataPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	req, err := st.CreateRequest(context.Background(), model.CreateRequest{
+		Source:   "callum",
+		Kind:     model.KindMessage,
+		Title:    *title,
+		Body:     bodyText,
+		Schema:   model.DefaultSchema(),
+		Priority: "normal",
+		Tags:     parseTags(tags),
 	})
 	if err != nil {
 		return err
@@ -475,6 +530,22 @@ func parseLinks(values []string) []model.Link {
 	return links
 }
 
+func parseTags(values []string) []string {
+	tags := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ",") {
+			tag := strings.TrimSpace(strings.TrimPrefix(part, "#"))
+			if tag == "" || seen[tag] {
+				continue
+			}
+			seen[tag] = true
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
 func printJSON(v any) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
@@ -488,6 +559,7 @@ Usage:
   wickle init [--api-url URL] [--data PATH]
   wickle serve [--listen HOST:PORT]
   wickle ask --title TITLE [--body TEXT] [--schema FILE]
+  wickle message --title TITLE [--body TEXT] [--tag TAG]
   wickle inbox [--status pending|answered|all]
   wickle show <request-id>
   wickle respond <request-id> --json '{"decision":"approve"}'

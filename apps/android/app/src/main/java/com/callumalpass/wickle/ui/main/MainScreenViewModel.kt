@@ -26,12 +26,26 @@ class MainScreenViewModel(private val repository: WickleRepository) : ViewModel(
     repository.updateSettings(settings)
   }
 
+  fun setPushEnabled(enabled: Boolean) {
+    repository.setPushEnabled(enabled)
+  }
+
   fun select(request: WickleRequest) {
     repository.select(request)
   }
 
   fun respond(request: WickleRequest, payload: JsonElement) {
     viewModelScope.launch { repository.respond(request, payload) }
+  }
+
+  fun sendMessage(title: String, body: String, tags: List<String>, onSent: () -> Unit = {}) {
+    viewModelScope.launch {
+      if (repository.sendMessage(title, body, tags)) onSent()
+    }
+  }
+
+  fun clearNotice() {
+    repository.clearNotice()
   }
 
   companion object {

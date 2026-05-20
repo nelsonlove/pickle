@@ -5,14 +5,17 @@ and automation handoffs.
 
 Agents and scripts create requests through the `wickle` CLI. A local daemon
 stores them in SQLite, exposes a Tailscale-friendly HTTP API, and streams new
-events to the Android app. The Android app runs a foreground realtime service so
-new requests can produce phone notifications without a public relay.
+events to the Android app. The Android app has separate Inbox, Detail, Post, and
+Settings pages, and runs a foreground realtime service so new requests can
+produce phone notifications without a public relay.
 
 ## Shape
 
 ```text
 agent / tickle job
         -> wickle ask
+human / phone
+        -> wickle message
         -> ~/.local/share/wickle/wickle.sqlite
         -> wickled HTTP + WebSocket over Tailscale
         -> Android inbox + notifications
@@ -36,7 +39,15 @@ go run ./cmd/wickle ask \
   --kind approval \
   --title "Close TaskNotes issue #1530?" \
   --body "Agent recommends closing this as wontfix." \
+  --tag ops \
+  --tag tasknotes \
   --schema testdata/approval.schema.json
+
+go run ./cmd/wickle message \
+  --title "Look at the fresh ops sidecar" \
+  --body "No approval needed yet; just leaving this for the next agent." \
+  --tag ops \
+  --tag note
 
 go run ./cmd/wickle inbox
 go run ./cmd/wickle respond req_xxx --json '{"decision":"approve","comment":"Looks right."}'
@@ -80,7 +91,11 @@ adb shell am start \
 ```
 
 The app has a foreground `Push` service. Android shows a persistent low-priority
-connection notification plus high-priority request notifications.
+connection notification plus high-priority request notifications. Push enabled
+state is persisted, the service is restarted after device boot or app update,
+and the service catches up from the server event log before resuming the live
+WebSocket so requests created while the phone was asleep or disconnected are not
+silently missed.
 
 ## Verification
 

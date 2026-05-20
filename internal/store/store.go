@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS requests (
   schema_json TEXT NOT NULL,
   status TEXT NOT NULL,
   priority TEXT NOT NULL,
+  tags_json TEXT NOT NULL DEFAULT '[]',
   links_json TEXT NOT NULL,
   metadata_json TEXT NOT NULL,
   dedupe_key TEXT,
@@ -87,6 +88,35 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_id_created
 ON events(id, created_at);
 `)
+	if err != nil {
+		return err
+	}
+	return s.ensureColumn(ctx, "requests", "tags_json", "TEXT NOT NULL DEFAULT '[]'")
+}
+
+func (s *Store) ensureColumn(ctx context.Context, table, column, definition string) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+column+` `+definition)
 	return err
 }
 
@@ -98,7 +128,7 @@ func (s *Store) CreateRequest(ctx context.Context, input model.CreateRequest) (m
 		input.Source = "agent"
 	}
 	if strings.TrimSpace(input.Kind) == "" {
-		input.Kind = "approval"
+		input.Kind = model.KindApproval
 	}
 	if strings.TrimSpace(input.Priority) == "" {
 		input.Priority = "normal"
@@ -111,6 +141,11 @@ func (s *Store) CreateRequest(ctx context.Context, input model.CreateRequest) (m
 	}
 	if input.Links == nil {
 		input.Links = []model.Link{}
+	}
+	tags := normalizeTags(input.Tags)
+	tagsJSON, err := json.Marshal(tags)
+	if err != nil {
+		return model.Request{}, fmt.Errorf("encode tags: %w", err)
 	}
 	linksJSON, err := json.Marshal(input.Links)
 	if err != nil {
@@ -130,6 +165,7 @@ func (s *Store) CreateRequest(ctx context.Context, input model.CreateRequest) (m
 		Schema:    input.Schema,
 		Status:    model.StatusPending,
 		Priority:  input.Priority,
+		Tags:      tags,
 		Links:     input.Links,
 		Metadata:  input.Metadata,
 		DedupeKey: input.DedupeKey,
@@ -145,11 +181,11 @@ func (s *Store) CreateRequest(ctx context.Context, input model.CreateRequest) (m
 
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO requests (
-  id, source, kind, title, body, schema_json, status, priority, links_json,
+  id, source, kind, title, body, schema_json, status, priority, tags_json, links_json,
   metadata_json, dedupe_key, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.ID, req.Source, req.Kind, req.Title, req.Body, string(req.Schema),
-		req.Status, req.Priority, string(linksJSON), string(req.Metadata),
+		req.Status, req.Priority, string(tagsJSON), string(linksJSON), string(req.Metadata),
 		nullable(input.DedupeKey), formatTime(req.CreatedAt), formatTime(req.UpdatedAt),
 	)
 	if err != nil {
@@ -168,6 +204,7 @@ INSERT INTO requests (
 		"source":   req.Source,
 		"kind":     req.Kind,
 		"priority": req.Priority,
+		"tags":     req.Tags,
 	})
 	if _, err := insertEvent(ctx, tx, model.EventRequestCreated, req.ID, payload, now); err != nil {
 		return model.Request{}, err
@@ -191,7 +228,7 @@ func (s *Store) ListRequests(ctx context.Context, status string, limit int) ([]m
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT r.id, r.source, r.kind, r.title, r.body, r.schema_json, r.status,
-       r.priority, r.links_json, r.metadata_json, r.dedupe_key, r.created_at,
+       r.priority, r.tags_json, r.links_json, r.metadata_json, r.dedupe_key, r.created_at,
        r.updated_at, r.answered_at, rp.responder, rp.payload_json, rp.created_at
 FROM requests r
 LEFT JOIN responses rp ON rp.request_id = r.id
@@ -313,7 +350,7 @@ func (s *Store) LastEventID(ctx context.Context) (int64, error) {
 func (s *Store) getRequest(ctx context.Context, where string, args ...any) (model.Request, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT r.id, r.source, r.kind, r.title, r.body, r.schema_json, r.status,
-       r.priority, r.links_json, r.metadata_json, r.dedupe_key, r.created_at,
+       r.priority, r.tags_json, r.links_json, r.metadata_json, r.dedupe_key, r.created_at,
        r.updated_at, r.answered_at, rp.responder, rp.payload_json, rp.created_at
 FROM requests r
 LEFT JOIN responses rp ON rp.request_id = r.id
@@ -331,7 +368,7 @@ LIMIT 1`, args...)
 
 func (s *Store) getRequestTx(ctx context.Context, tx *sql.Tx, where string, args ...any) (model.Request, error) {
 	rows, err := tx.QueryContext(ctx, `
-SELECT id, source, kind, title, body, schema_json, status, priority, links_json,
+SELECT id, source, kind, title, body, schema_json, status, priority, tags_json, links_json,
        metadata_json, dedupe_key, created_at, updated_at, answered_at
 FROM requests
 WHERE `+where+`
@@ -344,6 +381,7 @@ LIMIT 1`, args...)
 		return model.Request{}, ErrNotFound
 	}
 	var req model.Request
+	var tagsJSON string
 	var linksJSON string
 	var schemaJSON string
 	var metadataJSON string
@@ -352,7 +390,7 @@ LIMIT 1`, args...)
 	var createdAt, updatedAt string
 	if err := rows.Scan(
 		&req.ID, &req.Source, &req.Kind, &req.Title, &req.Body, &schemaJSON,
-		&req.Status, &req.Priority, &linksJSON, &metadataJSON, &dedupe,
+		&req.Status, &req.Priority, &tagsJSON, &linksJSON, &metadataJSON, &dedupe,
 		&createdAt, &updatedAt, &answeredAt,
 	); err != nil {
 		return model.Request{}, err
@@ -365,6 +403,9 @@ LIMIT 1`, args...)
 	if answeredAt.Valid {
 		t, _ := parseTime(answeredAt.String)
 		req.AnsweredAt = &t
+	}
+	if err := decodeStringList(tagsJSON, &req.Tags); err != nil {
+		return model.Request{}, err
 	}
 	if linksJSON == "null" || linksJSON == "" {
 		req.Links = []model.Link{}
@@ -390,6 +431,7 @@ type requestScanner interface {
 
 func scanRequest(rows requestScanner) (model.Request, error) {
 	var req model.Request
+	var tagsJSON string
 	var linksJSON string
 	var schemaJSON string
 	var metadataJSON string
@@ -399,7 +441,7 @@ func scanRequest(rows requestScanner) (model.Request, error) {
 	var responder, responsePayload, responseCreated sql.NullString
 	if err := rows.Scan(
 		&req.ID, &req.Source, &req.Kind, &req.Title, &req.Body, &schemaJSON,
-		&req.Status, &req.Priority, &linksJSON, &metadataJSON, &dedupe,
+		&req.Status, &req.Priority, &tagsJSON, &linksJSON, &metadataJSON, &dedupe,
 		&createdAt, &updatedAt, &answeredAt, &responder, &responsePayload, &responseCreated,
 	); err != nil {
 		return model.Request{}, err
@@ -422,6 +464,9 @@ func scanRequest(rows requestScanner) (model.Request, error) {
 			return model.Request{}, err
 		}
 		req.AnsweredAt = &t
+	}
+	if err := decodeStringList(tagsJSON, &req.Tags); err != nil {
+		return model.Request{}, err
 	}
 	if linksJSON == "null" || linksJSON == "" {
 		req.Links = []model.Link{}
@@ -466,6 +511,34 @@ func nullable(v string) any {
 		return nil
 	}
 	return v
+}
+
+func normalizeTags(tags []string) []string {
+	out := make([]string, 0, len(tags))
+	seen := map[string]bool{}
+	for _, tag := range tags {
+		tag = strings.TrimSpace(strings.TrimPrefix(tag, "#"))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+	}
+	return out
+}
+
+func decodeStringList(raw string, dest *[]string) error {
+	if raw == "" || raw == "null" {
+		*dest = []string{}
+		return nil
+	}
+	if err := json.Unmarshal([]byte(raw), dest); err != nil {
+		return fmt.Errorf("decode string list: %w", err)
+	}
+	if *dest == nil {
+		*dest = []string{}
+	}
+	return nil
 }
 
 func formatTime(t time.Time) string {

@@ -34,11 +34,36 @@ class WickleApi(private val client: OkHttpClient = OkHttpClient()) {
       }
     }
 
+  suspend fun events(settings: ConnectionSettings, after: Long, limit: Int = 100): List<WickleEvent> =
+    withContext(Dispatchers.IO) {
+      val request =
+        authed(settings, settings.serverUrl.trimEnd('/') + "/api/v1/events?after=$after&limit=$limit")
+          .get()
+          .build()
+      client.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) throw IOException("Events failed: HTTP ${response.code}")
+        json.decodeFromString<EventsResponse>(response.body.string()).events
+      }
+    }
+
   suspend fun request(settings: ConnectionSettings, id: String): WickleRequest =
     withContext(Dispatchers.IO) {
       val request = authed(settings, settings.serverUrl.trimEnd('/') + "/api/v1/requests/$id").get().build()
       client.newCall(request).execute().use { response ->
         if (!response.isSuccessful) throw IOException("Request failed: HTTP ${response.code}")
+        json.decodeFromString<WickleRequest>(response.body.string())
+      }
+    }
+
+  suspend fun createRequest(settings: ConnectionSettings, body: CreateRequestPayload): WickleRequest =
+    withContext(Dispatchers.IO) {
+      val requestBody = json.encodeToString(body).toRequestBody("application/json".toMediaType())
+      val request =
+        authed(settings, settings.serverUrl.trimEnd('/') + "/api/v1/requests")
+          .post(requestBody)
+          .build()
+      client.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) throw IOException("Message failed: HTTP ${response.code}: ${response.body.string()}")
         json.decodeFromString<WickleRequest>(response.body.string())
       }
     }
