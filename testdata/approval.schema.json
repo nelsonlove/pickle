@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["approve", "reject", "revise"]
+    },
+    "comment": {
+      "type": "string"
+    }
+  },
+  "required": ["decision"]
+}

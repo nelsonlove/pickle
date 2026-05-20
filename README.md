@@ -1,0 +1,116 @@
+# Wickle
+
+Wickle is a personal agent inbox for structured requests, approvals, annotations,
+and automation handoffs.
+
+Agents and scripts create requests through the `wickle` CLI. A local daemon
+stores them in SQLite, exposes a Tailscale-friendly HTTP API, and streams new
+events to the Android app. The Android app runs a foreground realtime service so
+new requests can produce phone notifications without a public relay.
+
+## Shape
+
+```text
+agent / tickle job
+        -> wickle ask
+        -> ~/.local/share/wickle/wickle.sqlite
+        -> wickled HTTP + WebSocket over Tailscale
+        -> Android inbox + notifications
+        -> structured response
+        -> wickle wait / wickle response / tickle trigger
+```
+
+## Backend Quick Start
+
+```bash
+go test ./...
+go run ./cmd/wickle init
+go run ./cmd/wickle serve --listen 0.0.0.0:8787
+```
+
+In another terminal:
+
+```bash
+go run ./cmd/wickle ask \
+  --source tasknotes-ops \
+  --kind approval \
+  --title "Close TaskNotes issue #1530?" \
+  --body "Agent recommends closing this as wontfix." \
+  --schema testdata/approval.schema.json
+
+go run ./cmd/wickle inbox
+go run ./cmd/wickle respond req_xxx --json '{"decision":"approve","comment":"Looks right."}'
+```
+
+For a real phone over Tailscale, keep `wickled` bound to a private interface or
+to all interfaces behind Tailscale:
+
+```bash
+wickle serve --listen 0.0.0.0:8787
+```
+
+Then enter the Tailnet URL and `wickle token` value in the Android app.
+
+## Android
+
+The Android project lives in `apps/android`. Configure the server URL and token
+inside the app settings. When testing on an emulator, use:
+
+```text
+http://10.0.2.2:8787
+```
+
+On a real phone over Tailscale, use the machine's Tailnet name or Tailscale IP:
+
+```text
+http://<machine-tailnet-name>:8787
+```
+
+The realtime service keeps a WebSocket open and posts local notifications for
+new pending requests. This is the default push path because it works over
+Tailscale without Firebase credentials or a public server.
+
+For emulator smoke tests, the activity also accepts configuration extras:
+
+```bash
+adb shell am start \
+  -n com.callumalpass.wickle/com.callumalpass.wickle.MainActivity \
+  --es wickle_server_url http://10.0.2.2:8787 \
+  --es wickle_token "$(wickle token)"
+```
+
+The app has a foreground `Push` service. Android shows a persistent low-priority
+connection notification plus high-priority request notifications.
+
+## Verification
+
+Backend:
+
+```bash
+go test ./...
+scripts/smoke.sh
+```
+
+Android:
+
+```bash
+cd apps/android
+./gradlew testDebugUnitTest assembleDebug lintDebug
+./gradlew connectedDebugAndroidTest
+```
+
+The smoke suite was run against a headless Android 36 `medium_phone` emulator.
+The notification path was verified through `dumpsys notification` after creating
+a Wickle request from the host CLI.
+
+## Security
+
+`wickle init` creates a bearer token in `~/.config/wickle/config.json`. The HTTP
+API requires that token for every `/api/*` route. If you bind beyond localhost,
+use Tailscale or another private network boundary.
+
+## Status
+
+This repo is an end-to-end first implementation. The core store, CLI, daemon,
+HTTP API, realtime stream, Android client, and smoke fixtures are designed to be
+small enough to audit and extend.
