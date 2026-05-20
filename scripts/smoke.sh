@@ -14,11 +14,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-export WICKLE_CONFIG_HOME="${TMP}/config"
-export WICKLE_DATA_HOME="${TMP}/data"
+export PICKLE_CONFIG_HOME="${TMP}/config"
+export PICKLE_DATA_HOME="${TMP}/data"
 
-BIN="${TMP}/wickle"
-go build -o "${BIN}" "${ROOT}/cmd/wickle"
+BIN="${TMP}/pickle"
+go build -o "${BIN}" "${ROOT}/cmd/pickle"
 
 "${BIN}" init --api-url "http://127.0.0.1:18787" >/dev/null
 "${BIN}" serve --listen "127.0.0.1:18787" >"${TMP}/server.log" 2>&1 &
@@ -32,6 +32,8 @@ for _ in {1..50}; do
 done
 curl -fsS "http://127.0.0.1:18787/health" >/dev/null
 
+printf '# Smoke attachment\n\nReview this markdown file.\n' >"${TMP}/context.md"
+
 WATCH_LOG="${TMP}/watch.log"
 "${BIN}" watch >"${WATCH_LOG}" 2>&1 &
 WATCH_PID="$!"
@@ -42,6 +44,7 @@ REQ_ID="$("${BIN}" ask \
   --kind approval \
   --title "Smoke approval" \
   --body "Approve the smoke test." \
+  --attach "${TMP}/context.md" \
   --schema "${ROOT}/testdata/approval.schema.json")"
 
 for _ in {1..30}; do
@@ -55,7 +58,7 @@ kill "${WATCH_PID}" >/dev/null 2>&1 || true
 wait "${WATCH_PID}" >/dev/null 2>&1 || true
 
 "${BIN}" inbox --json | grep -q "${REQ_ID}"
-"${BIN}" show --json "${REQ_ID}" | grep -q "Smoke approval"
+"${BIN}" show --json "${REQ_ID}" | jq -e '.title == "Smoke approval" and (.attachments | length == 1) and .attachments[0].content_type == "text/markdown"' >/dev/null
 "${BIN}" respond --json '{"decision":"approve","comment":"Smoke passed."}' "${REQ_ID}" >/dev/null
 "${BIN}" response "${REQ_ID}" | grep -q '"decision":"approve"'
 "${BIN}" events | grep -q "request.answered"
@@ -68,4 +71,4 @@ MSG_ID="$("${BIN}" message \
   --json | jq -r '.id')"
 "${BIN}" show --json "${MSG_ID}" | jq -e '.kind == "message" and (.tags == ["ops", "follow-up"])' >/dev/null
 
-echo "wickle smoke passed: ${REQ_ID}"
+echo "pickle smoke passed: ${REQ_ID}"

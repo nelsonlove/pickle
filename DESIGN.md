@@ -1,4 +1,4 @@
-# Wickle Design Notes
+# Pickle Design Notes
 
 ## Product Scene
 

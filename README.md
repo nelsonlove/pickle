@@ -1,9 +1,9 @@
-# Wickle
+# Pickle
 
-Wickle is a personal agent inbox for structured requests, approvals, annotations,
+Pickle is a personal agent inbox for structured requests, approvals, annotations,
 and automation handoffs.
 
-Agents and scripts create requests through the `wickle` CLI. A local daemon
+Agents and scripts create requests through the `pickle` CLI. A local daemon
 stores them in SQLite, exposes a Tailscale-friendly HTTP API, and streams new
 events to the Android app. The Android app has separate Inbox, Detail, Post, and
 Settings pages, and runs a foreground realtime service so new requests can
@@ -13,54 +13,74 @@ produce phone notifications without a public relay.
 
 ```text
 agent / tickle job
-        -> wickle ask
+        -> pickle ask
 human / phone
-        -> wickle message
-        -> ~/.local/share/wickle/wickle.sqlite
-        -> wickled HTTP + WebSocket over Tailscale
+        -> pickle message
+        -> ~/.local/share/pickle/pickle.sqlite
+        -> pickled HTTP + WebSocket over Tailscale
         -> Android inbox + notifications
         -> structured response
-        -> wickle wait / wickle response / tickle trigger
+        -> pickle wait / pickle response / tickle trigger
 ```
 
 ## Backend Quick Start
 
 ```bash
 go test ./...
-go run ./cmd/wickle init
-go run ./cmd/wickle serve --listen 0.0.0.0:8787
+go run ./cmd/pickle init
+go run ./cmd/pickle serve --listen 0.0.0.0:8787
 ```
 
 In another terminal:
 
 ```bash
-go run ./cmd/wickle ask \
+go run ./cmd/pickle ask \
   --source tasknotes-ops \
   --kind approval \
   --title "Close TaskNotes issue #1530?" \
   --body "Agent recommends closing this as wontfix." \
+  --attach context.md \
   --tag ops \
   --tag tasknotes \
   --schema testdata/approval.schema.json
 
-go run ./cmd/wickle message \
+go run ./cmd/pickle message \
   --title "Look at the fresh ops sidecar" \
   --body "No approval needed yet; just leaving this for the next agent." \
+  --attach screenshot.png \
   --tag ops \
   --tag note
 
-go run ./cmd/wickle inbox
-go run ./cmd/wickle respond req_xxx --json '{"decision":"approve","comment":"Looks right."}'
+go run ./cmd/pickle inbox
+go run ./cmd/pickle respond req_xxx --json '{"decision":"approve","comment":"Looks right."}'
 ```
 
-For a real phone over Tailscale, keep `wickled` bound to a private interface or
+## Attachments
+
+Requests can capture small review artifacts at creation time:
+
+```bash
+pickle ask \
+  --title "Review generated output?" \
+  --body "Please inspect the attached markdown summary and screenshot." \
+  --attach summary.md \
+  --attach screenshot.png
+```
+
+Supported attachment types are plaintext, Markdown, PNG, JPEG, and WebP. Pickle
+stores attachment metadata in SQLite and stores the file bytes under the Pickle
+data directory. Android downloads attachments lazily from authenticated request
+attachment endpoints and previews Markdown/plaintext inline plus images as
+visual previews.
+
+For a real phone over Tailscale, keep `pickled` bound to a private interface or
 to all interfaces behind Tailscale:
 
 ```bash
-wickle serve --listen 0.0.0.0:8787
+pickle serve --listen 0.0.0.0:8787
 ```
 
-Then enter the Tailnet URL and `wickle token` value in the Android app.
+Then enter the Tailnet URL and `pickle token` value in the Android app.
 
 ## Android
 
@@ -85,9 +105,9 @@ For emulator smoke tests, the activity also accepts configuration extras:
 
 ```bash
 adb shell am start \
-  -n com.callumalpass.wickle/com.callumalpass.wickle.MainActivity \
-  --es wickle_server_url http://10.0.2.2:8787 \
-  --es wickle_token "$(wickle token)"
+  -n com.callumalpass.pickle/com.callumalpass.pickle.MainActivity \
+  --es pickle_server_url http://10.0.2.2:8787 \
+  --es pickle_token "$(pickle token)"
 ```
 
 The app has a foreground `Push` service. Android shows a persistent low-priority
@@ -116,11 +136,11 @@ cd apps/android
 
 The smoke suite was run against a headless Android 36 `medium_phone` emulator.
 The notification path was verified through `dumpsys notification` after creating
-a Wickle request from the host CLI.
+a Pickle request from the host CLI.
 
 ## Security
 
-`wickle init` creates a bearer token in `~/.config/wickle/config.json`. The HTTP
+`pickle init` creates a bearer token in `~/.config/pickle/config.json`. The HTTP
 API requires that token for every `/api/*` route. If you bind beyond localhost,
 use Tailscale or another private network boundary.
 

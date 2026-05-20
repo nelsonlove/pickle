@@ -1,4 +1,4 @@
-module github.com/callumalpass/wickle
+module github.com/callumalpass/pickle
 
 go 1.26.3
 

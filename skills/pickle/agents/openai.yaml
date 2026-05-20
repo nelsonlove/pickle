@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pickle"
+  short_description: "Human approval inbox for local agents"
+  default_prompt: "Use $pickle to create or process a structured human approval request."

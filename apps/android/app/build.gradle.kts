@@ -5,10 +5,10 @@ plugins {
 }
 
 android {
-    namespace = "com.callumalpass.wickle"
+    namespace = "com.callumalpass.pickle"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.callumalpass.wickle"
+        applicationId = "com.callumalpass.pickle"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

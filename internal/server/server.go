@@ -6,13 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/callumalpass/wickle/internal/model"
-	"github.com/callumalpass/wickle/internal/store"
+	"github.com/callumalpass/pickle/internal/model"
+	"github.com/callumalpass/pickle/internal/store"
 	"github.com/gorilla/websocket"
 )
 
@@ -59,6 +60,9 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.handleInbox(w, r)
 	case r.Method == http.MethodPost && path == "/requests":
 		s.handleCreateRequest(w, r)
+	case r.Method == http.MethodGet && isAttachmentPath(path):
+		requestID, attachmentID, _ := parseAttachmentPath(path)
+		s.handleGetAttachment(w, r, requestID, attachmentID)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/requests/"):
 		s.handleGetRequest(w, r, strings.TrimPrefix(path, "/requests/"))
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/requests/") && strings.HasSuffix(path, "/responses"):
@@ -116,6 +120,26 @@ func (s *Server) handleGetRequest(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 	writeJSON(w, http.StatusOK, req)
+}
+
+func (s *Server) handleGetAttachment(w http.ResponseWriter, r *http.Request, requestID, attachmentID string) {
+	if requestID == "" || attachmentID == "" || strings.Contains(requestID, "/") || strings.Contains(attachmentID, "/") {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	attachment, path, err := s.store.GetAttachment(r.Context(), requestID, attachmentID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", attachment.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(attachment.SizeBytes, 10))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": attachment.Filename}))
+	http.ServeFile(w, r, path)
 }
 
 func (s *Server) handleRespond(w http.ResponseWriter, r *http.Request, id string) {
@@ -190,7 +214,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token == "" {
-			token = r.Header.Get("X-Wickle-Token")
+			token = r.Header.Get("X-Pickle-Token")
 		}
 		if token == "" {
 			token = r.URL.Query().Get("token")
@@ -209,6 +233,23 @@ func parseLimit(raw string) int {
 		return 100
 	}
 	return limit
+}
+
+func isAttachmentPath(path string) bool {
+	_, _, ok := parseAttachmentPath(path)
+	return ok
+}
+
+func parseAttachmentPath(path string) (string, string, bool) {
+	trimmed := strings.TrimPrefix(path, "/requests/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 3 || parts[1] != "attachments" {
+		return "", "", false
+	}
+	if parts[0] == "" || parts[2] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[2], true
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

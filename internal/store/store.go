@@ -9,15 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/callumalpass/wickle/internal/model"
-	"github.com/callumalpass/wickle/internal/schema"
+	"github.com/callumalpass/pickle/internal/model"
+	"github.com/callumalpass/pickle/internal/schema"
 	_ "modernc.org/sqlite"
 )
 
 var ErrNotFound = errors.New("not found")
 
 type Store struct {
-	db *sql.DB
+	db            *sql.DB
+	attachmentDir string
 }
 
 func Open(path string) (*Store, error) {
@@ -26,7 +27,12 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	attachmentDir, err := defaultAttachmentDir(path)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	s := &Store{db: db, attachmentDir: attachmentDir}
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -76,6 +82,20 @@ CREATE TABLE IF NOT EXISTS responses (
   payload_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  storage_path TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS attachments_request_created
+ON attachments(request_id, created_at, id);
 
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,26 +171,31 @@ func (s *Store) CreateRequest(ctx context.Context, input model.CreateRequest) (m
 	if err != nil {
 		return model.Request{}, fmt.Errorf("encode links: %w", err)
 	}
+	attachments, err := s.prepareAttachments(input.Attachments)
+	if err != nil {
+		return model.Request{}, err
+	}
 	id, err := model.NewRequestID()
 	if err != nil {
 		return model.Request{}, err
 	}
 	now := time.Now().UTC()
 	req := model.Request{
-		ID:        id,
-		Source:    input.Source,
-		Kind:      input.Kind,
-		Title:     input.Title,
-		Body:      input.Body,
-		Schema:    input.Schema,
-		Status:    model.StatusPending,
-		Priority:  input.Priority,
-		Tags:      tags,
-		Links:     input.Links,
-		Metadata:  input.Metadata,
-		DedupeKey: input.DedupeKey,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          id,
+		Source:      input.Source,
+		Kind:        input.Kind,
+		Title:       input.Title,
+		Body:        input.Body,
+		Schema:      input.Schema,
+		Status:      model.StatusPending,
+		Priority:    input.Priority,
+		Tags:        tags,
+		Links:       input.Links,
+		Attachments: attachmentModels(attachments, id, now),
+		Metadata:    input.Metadata,
+		DedupeKey:   input.DedupeKey,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -194,17 +219,32 @@ INSERT INTO requests (
 			if getErr != nil {
 				return model.Request{}, err
 			}
-			return existing, tx.Commit()
+			if err := tx.Commit(); err != nil {
+				return model.Request{}, err
+			}
+			return s.GetRequest(ctx, existing.ID)
 		}
 		return model.Request{}, err
 	}
+	written, err := s.storeAttachmentsTx(ctx, tx, req.ID, attachments, now)
+	if err != nil {
+		cleanupFiles(written)
+		return model.Request{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			cleanupFiles(written)
+		}
+	}()
 	payload, _ := json.Marshal(map[string]any{
-		"id":       req.ID,
-		"title":    req.Title,
-		"source":   req.Source,
-		"kind":     req.Kind,
-		"priority": req.Priority,
-		"tags":     req.Tags,
+		"id":          req.ID,
+		"title":       req.Title,
+		"source":      req.Source,
+		"kind":        req.Kind,
+		"priority":    req.Priority,
+		"tags":        req.Tags,
+		"attachments": attachmentEventPayload(req.Attachments),
 	})
 	if _, err := insertEvent(ctx, tx, model.EventRequestCreated, req.ID, payload, now); err != nil {
 		return model.Request{}, err
@@ -212,6 +252,7 @@ INSERT INTO requests (
 	if err := tx.Commit(); err != nil {
 		return model.Request{}, err
 	}
+	committed = true
 	return req, nil
 }
 
@@ -247,11 +288,22 @@ LIMIT ?`, args...)
 		}
 		out = append(out, req)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return s.loadAttachmentsForRequests(ctx, out)
 }
 
 func (s *Store) GetRequest(ctx context.Context, id string) (model.Request, error) {
-	return s.getRequest(ctx, "r.id = ?", id)
+	req, err := s.getRequest(ctx, "r.id = ?", id)
+	if err != nil {
+		return model.Request{}, err
+	}
+	req.Attachments, err = s.ListAttachments(ctx, req.ID)
+	if err != nil {
+		return model.Request{}, err
+	}
+	return req, nil
 }
 
 func (s *Store) Respond(ctx context.Context, requestID string, input model.CreateResponse) (model.Request, error) {

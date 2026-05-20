@@ -1,4 +1,4 @@
-# Wickle Product Context
+# Pickle Product Context
 
 ## Register
 
@@ -12,11 +12,11 @@ Tickle jobs, repo-local ops files, Tailscale, and an Android phone.
 
 ## Purpose
 
-Wickle is a personal agent inbox for structured requests, approvals, annotations,
+Pickle is a personal agent inbox for structured requests, approvals, annotations,
 and automation handoffs. Agents file a request, the user responds asynchronously,
 and later automation can continue from the recorded response.
 
-Wickle is not a chat app, task manager, or generic message queue. It is the
+Pickle is not a chat app, task manager, or generic message queue. It is the
 human checkpoint in a local automation system.
 
 ## Product Principles
@@ -30,7 +30,7 @@ human checkpoint in a local automation system.
 
 ## Tone
 
-Small, precise, grounded, and calm. Wickle should feel like a quiet operations
+Small, precise, grounded, and calm. Pickle should feel like a quiet operations
 desk: pending decisions are obvious, context is easy to scan, and approval
 actions are deliberate.
 

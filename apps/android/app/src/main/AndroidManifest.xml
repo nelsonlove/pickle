@@ -15,9 +15,9 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:windowSoftInputMode="adjustResize"
-        android:theme="@style/Theme.Wickle">
+        android:theme="@style/Theme.Pickle">
         <activity
-            android:name="com.callumalpass.wickle.MainActivity"
+            android:name="com.callumalpass.pickle.MainActivity"
             android:exported="true"
             tools:ignore="Instantiatable">
             <intent-filter>
@@ -26,11 +26,11 @@
             </intent-filter>
         </activity>
         <service
-            android:name="com.callumalpass.wickle.realtime.WickleRealtimeService"
+            android:name="com.callumalpass.pickle.realtime.PickleRealtimeService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <receiver
-            android:name="com.callumalpass.wickle.realtime.WickleBootReceiver"
+            android:name="com.callumalpass.pickle.realtime.PickleBootReceiver"
             android:enabled="true"
             android:exported="false">
             <intent-filter>

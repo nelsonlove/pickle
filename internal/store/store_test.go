@@ -3,15 +3,16 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/callumalpass/wickle/internal/model"
+	"github.com/callumalpass/pickle/internal/model"
 )
 
 func TestCreateRespondAndEvents(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "wickle.sqlite"))
+	s, err := Open(filepath.Join(t.TempDir(), "pickle.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func TestCreateRespondAndEvents(t *testing.T) {
 
 func TestListRequestsReturnsMessageTags(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "wickle.sqlite"))
+	s, err := Open(filepath.Join(t.TempDir(), "pickle.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func TestListRequestsReturnsMessageTags(t *testing.T) {
 
 func TestDedupeKeyReturnsExistingRequest(t *testing.T) {
 	ctx := context.Background()
-	s, err := Open(filepath.Join(t.TempDir(), "wickle.sqlite"))
+	s, err := Open(filepath.Join(t.TempDir(), "pickle.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +124,59 @@ func TestDedupeKeyReturnsExistingRequest(t *testing.T) {
 	}
 	if first.ID != second.ID {
 		t.Fatalf("dedupe returned new request: %s != %s", first.ID, second.ID)
+	}
+}
+
+func TestCreateRequestStoresAttachments(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "pickle.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	req, err := s.CreateRequest(ctx, model.CreateRequest{
+		Title: "Review note",
+		Attachments: []model.CreateAttachment{
+			{
+				Filename:    "decision.md",
+				ContentType: "text/markdown",
+				Data:        []byte("# Decision\n\nApprove it.\n"),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Attachments) != 1 {
+		t.Fatalf("attachments = %#v", req.Attachments)
+	}
+	attachment := req.Attachments[0]
+	if attachment.Filename != "decision.md" || attachment.ContentType != "text/markdown" || attachment.SizeBytes == 0 {
+		t.Fatalf("bad attachment: %#v", attachment)
+	}
+
+	fetched, path, err := s.GetAttachment(ctx, req.ID, attachment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetched.SHA256 != attachment.SHA256 {
+		t.Fatalf("sha = %q, want %q", fetched.SHA256, attachment.SHA256)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "# Decision\n\nApprove it.\n" {
+		t.Fatalf("attachment data = %q", data)
+	}
+
+	listed, err := s.GetRequest(ctx, req.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Attachments) != 1 || listed.Attachments[0].ID != attachment.ID {
+		t.Fatalf("listed attachments = %#v", listed.Attachments)
 	}
 }
 

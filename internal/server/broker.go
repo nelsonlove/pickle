@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/callumalpass/wickle/internal/model"
-	"github.com/callumalpass/wickle/internal/store"
+	"github.com/callumalpass/pickle/internal/model"
+	"github.com/callumalpass/pickle/internal/store"
 )
 
 type Broker struct {

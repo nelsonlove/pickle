@@ -18,47 +18,47 @@ type Config struct {
 }
 
 func ConfigDir() string {
-	if v := os.Getenv("WICKLE_CONFIG_HOME"); v != "" {
+	if v := os.Getenv("PICKLE_CONFIG_HOME"); v != "" {
 		return v
 	}
 	if runtime.GOOS == "windows" {
 		if v := os.Getenv("APPDATA"); v != "" {
-			return filepath.Join(v, "Wickle")
+			return filepath.Join(v, "Pickle")
 		}
 	}
 	if runtime.GOOS == "darwin" {
 		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, "Library", "Application Support", "wickle")
+			return filepath.Join(home, "Library", "Application Support", "pickle")
 		}
 	}
 	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, "wickle")
+		return filepath.Join(v, "pickle")
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".config", "wickle")
+		return filepath.Join(home, ".config", "pickle")
 	}
 	return "."
 }
 
 func DataDir() string {
-	if v := os.Getenv("WICKLE_DATA_HOME"); v != "" {
+	if v := os.Getenv("PICKLE_DATA_HOME"); v != "" {
 		return v
 	}
 	if runtime.GOOS == "windows" {
 		if v := os.Getenv("LOCALAPPDATA"); v != "" {
-			return filepath.Join(v, "Wickle")
+			return filepath.Join(v, "Pickle")
 		}
 	}
 	if runtime.GOOS == "darwin" {
 		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, "Library", "Application Support", "wickle")
+			return filepath.Join(home, "Library", "Application Support", "pickle")
 		}
 	}
 	if v := os.Getenv("XDG_DATA_HOME"); v != "" {
-		return filepath.Join(v, "wickle")
+		return filepath.Join(v, "pickle")
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "share", "wickle")
+		return filepath.Join(home, ".local", "share", "pickle")
 	}
 	return "."
 }
@@ -69,7 +69,7 @@ func Path() string {
 
 func Default() Config {
 	return Config{
-		DataPath: filepath.Join(DataDir(), "wickle.sqlite"),
+		DataPath: filepath.Join(DataDir(), "pickle.sqlite"),
 		APIURL:   "http://127.0.0.1:8787",
 	}
 }

@@ -1,14 +1,14 @@
 # User Service
 
-Wickle can run as a normal user service. Install the binary somewhere stable,
-then create `~/.config/systemd/user/wickle.service`:
+Pickle can run as a normal user service. Install the binary somewhere stable,
+then create `~/.config/systemd/user/pickle.service`:
 
 ```ini
 [Unit]
-Description=Wickle agent inbox daemon
+Description=Pickle agent inbox daemon
 
 [Service]
-ExecStart=%h/.local/bin/wickle serve --listen 0.0.0.0:8787
+ExecStart=%h/.local/bin/pickle serve --listen 0.0.0.0:8787
 Restart=on-failure
 RestartSec=5
 
@@ -20,9 +20,9 @@ Enable it:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now wickle.service
-systemctl --user status wickle.service
+systemctl --user enable --now pickle.service
+systemctl --user status pickle.service
 ```
 
-Use `wickle token` to copy the Android bearer token. Keep the listener on
+Use `pickle token` to copy the Android bearer token. Keep the listener on
 Tailscale or another private network.
