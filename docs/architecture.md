@@ -47,4 +47,5 @@ served through authenticated lazy-download endpoints. Events include attachment
 metadata only, never file bytes.
 
 Structured response schemas use a small JSON Schema subset that native clients
-can render predictably: enums, booleans, strings, and required object fields.
+can render predictably: enums, booleans, strings, required object fields, and
+arrays with primitive or enum `items`. Array schemas may use `minItems`.

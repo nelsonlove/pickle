@@ -41,6 +41,7 @@ import kotlinx.serialization.json.JsonElement
 @Composable
 internal fun DetailPage(
   request: PickleRequest?,
+  sending: Boolean,
   onBack: () -> Unit,
   onRespond: (PickleRequest, JsonElement) -> Unit,
   onDismissMessage: (PickleRequest) -> Unit,
@@ -119,7 +120,7 @@ internal fun DetailPage(
         }
       }
     } else {
-      ResponseForm(request, onRespond)
+      ResponseForm(request, sending, onRespond)
     }
 
     OutlinedButton(onClick = onBack, shape = RoundedCornerShape(7.dp)) {

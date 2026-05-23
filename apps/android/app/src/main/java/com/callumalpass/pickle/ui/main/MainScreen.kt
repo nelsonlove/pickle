@@ -135,8 +135,8 @@ fun PickleApp(
   onTestConnection: () -> Unit,
   onStartRealtime: () -> Unit,
   onStopRealtime: () -> Unit,
-  onRespond: (PickleRequest, JsonElement) -> Unit,
-  onDismissMessage: (PickleRequest) -> Unit,
+  onRespond: (PickleRequest, JsonElement, () -> Unit) -> Unit,
+  onDismissMessage: (PickleRequest, () -> Unit) -> Unit,
   onLoadAttachment: (PickleRequest, PickleAttachment) -> Unit,
   onSendMessage: (String, String, List<String>, () -> Unit) -> Unit,
   onNoticeShown: () -> Unit,
@@ -196,14 +196,17 @@ fun PickleApp(
         PickleRoute.Detail.name ->
           DetailPage(
             request = selected,
+            sending = state.sending,
             onBack = { route = PickleRoute.Inbox.name },
             onRespond = { request, payload ->
-              onRespond(request, payload)
-              route = PickleRoute.Inbox.name
+              onRespond(request, payload) {
+                route = PickleRoute.Inbox.name
+              }
             },
             onDismissMessage = { request ->
-              onDismissMessage(request)
-              route = PickleRoute.Inbox.name
+              onDismissMessage(request) {
+                route = PickleRoute.Inbox.name
+              }
             },
             attachmentPreviews = state.attachmentPreviews,
             onLoadAttachment = onLoadAttachment,
@@ -418,10 +421,24 @@ fun PickleAppPreview() {
                         JsonObject(
                           mapOf(
                             "decision" to JsonObject(mapOf("type" to JsonPrimitive("string"), "enum" to JsonArray(listOf(JsonPrimitive("approve"), JsonPrimitive("reject"), JsonPrimitive("revise"))))),
+                            "approved_items" to
+                              JsonObject(
+                                mapOf(
+                                  "type" to JsonPrimitive("array"),
+                                  "items" to
+                                    JsonObject(
+                                      mapOf(
+                                        "type" to JsonPrimitive("string"),
+                                        "enum" to JsonArray(listOf(JsonPrimitive("issue-1529"), JsonPrimitive("issue-1530"), JsonPrimitive("issue-1531"))),
+                                      ),
+                                    ),
+                                  "minItems" to JsonPrimitive(1),
+                                ),
+                              ),
                             "comment" to JsonObject(mapOf("type" to JsonPrimitive("string"))),
                           ),
                         ),
-                      "required" to JsonArray(listOf(JsonPrimitive("decision"))),
+                      "required" to JsonArray(listOf(JsonPrimitive("decision"), JsonPrimitive("approved_items"))),
                     ),
                   ),
                 status = "pending",
@@ -438,8 +455,8 @@ fun PickleAppPreview() {
       onTestConnection = {},
       onStartRealtime = {},
       onStopRealtime = {},
-      onRespond = { _, _ -> },
-      onDismissMessage = {},
+      onRespond = { _, _, done -> done() },
+      onDismissMessage = { _, done -> done() },
       onLoadAttachment = { _, _ -> },
       onSendMessage = { _, _, _, done -> done() },
       onNoticeShown = {},

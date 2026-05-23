@@ -41,8 +41,8 @@ class MainScreenTest {
           onTestConnection = {},
           onStartRealtime = {},
           onStopRealtime = {},
-          onRespond = { _, _ -> },
-          onDismissMessage = {},
+          onRespond = { _, _, done -> done() },
+          onDismissMessage = { _, done -> done() },
           onSendMessage = { _, _, _, done -> done() },
           onNoticeShown = {},
         )

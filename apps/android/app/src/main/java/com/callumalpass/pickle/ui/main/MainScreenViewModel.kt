@@ -39,12 +39,16 @@ class MainScreenViewModel(private val repository: PickleRepository) : ViewModel(
     viewModelScope.launch { repository.loadAttachment(request, attachment) }
   }
 
-  fun respond(request: PickleRequest, payload: JsonElement) {
-    viewModelScope.launch { repository.respond(request, payload) }
+  fun respond(request: PickleRequest, payload: JsonElement, onSent: () -> Unit = {}) {
+    viewModelScope.launch {
+      if (repository.respond(request, payload)) onSent()
+    }
   }
 
-  fun dismissMessage(request: PickleRequest) {
-    viewModelScope.launch { repository.dismissMessage(request) }
+  fun dismissMessage(request: PickleRequest, onDismissed: () -> Unit = {}) {
+    viewModelScope.launch {
+      if (repository.dismissMessage(request)) onDismissed()
+    }
   }
 
   fun sendMessage(title: String, body: String, tags: List<String>, onSent: () -> Unit = {}) {

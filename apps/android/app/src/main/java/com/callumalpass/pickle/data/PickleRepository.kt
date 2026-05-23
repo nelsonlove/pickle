@@ -167,24 +167,27 @@ class PickleRepository(context: Context, private val api: PickleApi = PickleApi(
     }
   }
 
-  suspend fun respond(request: PickleRequest, payload: JsonElement) {
-    submitResponse(request, payload, "Response sent")
+  suspend fun respond(request: PickleRequest, payload: JsonElement): Boolean {
+    return submitResponse(request, payload, "Response sent")
   }
 
-  suspend fun dismissMessage(request: PickleRequest) {
-    submitResponse(request, dismissMessagePayload(), "Message dismissed")
+  suspend fun dismissMessage(request: PickleRequest): Boolean {
+    return submitResponse(request, dismissMessagePayload(), "Message dismissed")
   }
 
-  private suspend fun submitResponse(request: PickleRequest, payload: JsonElement, successNotice: String) {
+  private suspend fun submitResponse(request: PickleRequest, payload: JsonElement, successNotice: String): Boolean {
     val settings = settingsStore.load()
+    mutableState.update { it.copy(sending = true, error = null, notice = null, settings = settings) }
     try {
       val updated = api.respond(settings, request.id, SubmitResponseRequest(responder = "callum", payload = payload))
       mutableState.update { state ->
         val remaining = state.requests.filterNot { it.id == updated.id }
-        state.copy(requests = remaining, selected = null, notice = successNotice, error = null)
+        state.copy(requests = remaining, selected = null, sending = false, notice = successNotice, error = null)
       }
+      return true
     } catch (error: Throwable) {
-      mutableState.update { it.copy(error = friendlyConnectionError(error)) }
+      mutableState.update { it.copy(sending = false, error = friendlyConnectionError(error)) }
+      return false
     }
   }
 

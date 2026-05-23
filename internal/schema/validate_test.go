@@ -21,3 +21,28 @@ func TestValidateResponseSubset(t *testing.T) {
 		t.Fatal("expected required validation error")
 	}
 }
+
+func TestValidateResponseArrayItems(t *testing.T) {
+	schema := []byte(`{
+	  "type":"object",
+	  "properties":{
+	    "approved_items":{
+	      "type":"array",
+	      "items":{"type":"string","enum":["issue-1","issue-2","issue-3"]},
+	      "minItems":1
+	    }
+	  }
+	}`)
+	if err := ValidateResponse(schema, []byte(`{"approved_items":["issue-1","issue-3"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateResponse(schema, []byte(`{"approved_items":[]}`)); err == nil {
+		t.Fatal("expected minItems validation error")
+	}
+	if err := ValidateResponse(schema, []byte(`{"approved_items":["issue-4"]}`)); err == nil {
+		t.Fatal("expected item enum validation error")
+	}
+	if err := ValidateResponse(schema, []byte(`{"approved_items":"issue-1"}`)); err == nil {
+		t.Fatal("expected array type validation error")
+	}
+}

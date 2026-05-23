@@ -12,8 +12,10 @@ type objectSchema struct {
 }
 
 type propertySchema struct {
-	Type string          `json:"type"`
-	Enum json.RawMessage `json:"enum"`
+	Type     string          `json:"type"`
+	Enum     json.RawMessage `json:"enum"`
+	Items    *propertySchema `json:"items"`
+	MinItems *int            `json:"minItems"`
 }
 
 func ValidateResponse(schemaJSON, payloadJSON []byte) error {
@@ -41,16 +43,35 @@ func ValidateResponse(schemaJSON, payloadJSON []byte) error {
 		if !ok || value == nil {
 			continue
 		}
-		if prop.Type != "" && !matchesType(value, prop.Type) {
-			return fmt.Errorf("response field %q must be %s", field, prop.Type)
+		if err := validatePropertyValue(field, prop, value); err != nil {
+			return err
 		}
-		if len(prop.Enum) > 0 && string(prop.Enum) != "null" {
-			var allowed []any
-			if err := json.Unmarshal(prop.Enum, &allowed); err != nil {
-				return fmt.Errorf("schema enum for %q is invalid", field)
-			}
-			if !containsJSONValue(allowed, value) {
-				return fmt.Errorf("response field %q is not an allowed value", field)
+	}
+	return nil
+}
+
+func validatePropertyValue(field string, prop propertySchema, value any) error {
+	if prop.Type != "" && !matchesType(value, prop.Type) {
+		return fmt.Errorf("response field %q must be %s", field, prop.Type)
+	}
+	if len(prop.Enum) > 0 && string(prop.Enum) != "null" {
+		var allowed []any
+		if err := json.Unmarshal(prop.Enum, &allowed); err != nil {
+			return fmt.Errorf("schema enum for %q is invalid", field)
+		}
+		if !containsJSONValue(allowed, value) {
+			return fmt.Errorf("response field %q is not an allowed value", field)
+		}
+	}
+	if items, ok := value.([]any); ok {
+		if prop.MinItems != nil && len(items) < *prop.MinItems {
+			return fmt.Errorf("response field %q must include at least %d item(s)", field, *prop.MinItems)
+		}
+		if prop.Items != nil {
+			for index, item := range items {
+				if err := validatePropertyValue(fmt.Sprintf("%s[%d]", field, index), *prop.Items, item); err != nil {
+					return err
+				}
 			}
 		}
 	}
