@@ -37,7 +37,12 @@ import com.callumalpass.pickle.data.AttachmentPreview
 import com.callumalpass.pickle.data.PickleAttachment
 import com.callumalpass.pickle.data.PickleLink
 import com.callumalpass.pickle.data.PickleRequest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 @Composable
 internal fun DetailPage(
@@ -84,30 +89,16 @@ internal fun DetailPage(
               style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (request.body.isNotBlank()) {
-              Text(request.body, style = MaterialTheme.typography.bodyLarge)
-            }
           }
         }
+        MarkdownText(request.body)
         LinkBlock(request.links)
         AttachmentBlock(request, attachmentPreviews, onLoadAttachment)
       }
     }
 
     if (request.response != null) {
-      Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-      ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-          Text("Response", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-          SelectionContainer {
-            Text(request.response.payload.toString(), style = MaterialTheme.typography.bodyMedium)
-          }
-        }
-      }
+      AnsweredReceipt(request)
     } else if (request.kind == "message") {
       Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -214,17 +205,16 @@ private fun AttachmentPreviewItem(attachment: PickleAttachment, preview: Attachm
         preview.loading -> Text("Loading preview...", style = MaterialTheme.typography.bodySmall)
         preview.error != null -> Text(preview.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         preview.text != null ->
-          Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(6.dp),
-            color = MaterialTheme.colorScheme.surface,
-          ) {
+          if (attachment.isMarkdown()) {
+            MarkdownText(preview.text, rawLabel = "Raw attachment")
+          } else {
             SelectionContainer {
-              Text(
+              RawTextBlock(
                 preview.text,
-                modifier = Modifier.padding(10.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                fontFamily = if (attachment.contentType == "text/plain") FontFamily.Monospace else FontFamily.Default,
+                style =
+                  MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                  ),
               )
             }
           }
@@ -249,9 +239,96 @@ private fun AttachmentPreviewItem(attachment: PickleAttachment, preview: Attachm
   }
 }
 
+@Composable
+private fun AnsweredReceipt(request: PickleRequest) {
+  val response = request.response ?: return
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(8.dp),
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+  ) {
+    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Answered", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        KindChip("receipt", request.priority)
+      }
+      Text(
+        "${response.responder} / ${formatTimestamp(response.createdAt)}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+
+      ResponseSummary(response.payload)
+
+      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Audit trail", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        ReceiptField("Request", request.id)
+        ReceiptField("Created", formatTimestamp(request.createdAt))
+        ReceiptField("Answered", request.answeredAt?.let(::formatTimestamp) ?: formatTimestamp(response.createdAt))
+        ReceiptField("Status", request.status)
+      }
+
+      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Raw response", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        SelectionContainer {
+          RawTextBlock(formatJson(response.payload))
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ResponseSummary(payload: JsonElement) {
+  val payloadObject = payload as? JsonObject ?: return
+  if (payloadObject.isEmpty()) return
+  Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Text("Response summary", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+    payloadObject.entries.forEach { (key, value) ->
+      ReceiptField(key.prettyFieldLabel(), value.summaryValue())
+    }
+  }
+}
+
+@Composable
+private fun ReceiptField(label: String, value: String) {
+  Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    SelectionContainer {
+      Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+  }
+}
+
 private fun formatBytes(bytes: Long): String =
   when {
     bytes >= 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
     bytes >= 1024 -> "%.1f KB".format(bytes / 1024.0)
     else -> "$bytes B"
   }
+
+private val prettyJson =
+  Json {
+    prettyPrint = true
+  }
+
+private fun formatJson(element: JsonElement): String =
+  runCatching { prettyJson.encodeToString(JsonElement.serializer(), element) }.getOrDefault(element.toString())
+
+private fun PickleAttachment.isMarkdown(): Boolean {
+  val normalized = contentType.substringBefore(";").trim().lowercase()
+  return normalized == "text/markdown" || normalized == "application/markdown" || filename.endsWith(".md", ignoreCase = true)
+}
+
+private fun JsonElement.summaryValue(): String =
+  when (this) {
+    is JsonPrimitive -> contentOrNull ?: toString()
+    is JsonArray -> if (size <= 4) joinToString(", ") { it.summaryValue() } else "${size} items"
+    is JsonObject -> "${size} fields"
+  }
+
+private fun String.prettyFieldLabel(): String =
+  split("_", "-")
+    .filter { it.isNotBlank() }
+    .joinToString(" ") { part -> part.replaceFirstChar { it.uppercase() } }

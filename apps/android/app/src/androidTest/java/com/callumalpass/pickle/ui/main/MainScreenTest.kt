@@ -35,7 +35,7 @@ class MainScreenTest {
                   ),
                 ),
             ),
-          onRefresh = {},
+          onRefresh = { _ -> },
           onSelect = {},
           onSaveSettings = {},
           onTestConnection = {},

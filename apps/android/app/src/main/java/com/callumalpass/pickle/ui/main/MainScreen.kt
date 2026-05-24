@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -81,6 +82,8 @@ import kotlinx.serialization.json.JsonPrimitive
 @Composable
 fun MainScreen(
   modifier: Modifier = Modifier,
+  openRequestId: String? = null,
+  onOpenRequestHandled: () -> Unit = {},
   viewModel: MainScreenViewModel = viewModel(factory = MainScreenViewModel.factory(LocalContext.current)),
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -95,12 +98,20 @@ fun MainScreen(
       }
     }
 
-  LaunchedEffect(Unit) { viewModel.refresh() }
-  LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh() }
+  LaunchedEffect(Unit) { viewModel.refresh(state.inboxStatus) }
+  LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refresh(state.inboxStatus) }
+  LaunchedEffect(openRequestId) {
+    val requestId = openRequestId?.trim()
+    if (!requestId.isNullOrBlank()) {
+      viewModel.openRequest(requestId)
+      onOpenRequestHandled()
+    }
+  }
 
   PickleApp(
     state = state,
-    onRefresh = viewModel::refresh,
+    openRequestId = openRequestId,
+    onRefresh = { status -> viewModel.refresh(status) },
     onSelect = viewModel::select,
     onSaveSettings = viewModel::saveSettings,
     onTestConnection = viewModel::testConnection,
@@ -128,7 +139,8 @@ fun MainScreen(
 @Composable
 fun PickleApp(
   state: PickleUiState,
-  onRefresh: () -> Unit,
+  openRequestId: String? = null,
+  onRefresh: (String) -> Unit,
   onSelect: (PickleRequest) -> Unit,
   onSaveSettings: (ConnectionSettings) -> Unit,
   onTestConnection: () -> Unit,
@@ -142,9 +154,45 @@ fun PickleApp(
   modifier: Modifier = Modifier,
 ) {
   var route by rememberSaveable { mutableStateOf(PickleRoute.Inbox.name) }
+  var inboxStatus by rememberSaveable { mutableStateOf(state.inboxStatus) }
+  var inboxKind by rememberSaveable { mutableStateOf(INBOX_FILTER_ALL) }
+  var inboxPriority by rememberSaveable { mutableStateOf(INBOX_FILTER_ALL) }
+  var inboxSource by rememberSaveable { mutableStateOf(INBOX_FILTER_ALL) }
+  var inboxTag by rememberSaveable { mutableStateOf(INBOX_FILTER_ALL) }
+  var inboxQuery by rememberSaveable { mutableStateOf("") }
   val snackbarHostState = remember { SnackbarHostState() }
   val clipboard = LocalClipboardManager.current
   val selected = state.selected ?: state.requests.firstOrNull()
+  val inboxFilters =
+    InboxFilters(
+      status = inboxStatus,
+      kind = inboxKind,
+      priority = inboxPriority,
+      source = inboxSource,
+      tag = inboxTag,
+      query = inboxQuery,
+    )
+
+  fun setInboxFilters(next: InboxFilters) {
+    val statusChanged = next.status != inboxStatus
+    inboxStatus = next.status
+    inboxKind = if (statusChanged) INBOX_FILTER_ALL else next.kind
+    inboxPriority = if (statusChanged) INBOX_FILTER_ALL else next.priority
+    inboxSource = if (statusChanged) INBOX_FILTER_ALL else next.source
+    inboxTag = if (statusChanged) INBOX_FILTER_ALL else next.tag
+    inboxQuery = next.query
+    if (statusChanged) onRefresh(next.status)
+  }
+
+  LaunchedEffect(state.inboxStatus) {
+    inboxStatus = state.inboxStatus
+  }
+
+  LaunchedEffect(openRequestId) {
+    if (!openRequestId.isNullOrBlank()) {
+      route = PickleRoute.Detail.name
+    }
+  }
 
   LaunchedEffect(state.notice, state.error) {
     val message = state.notice ?: state.error
@@ -169,10 +217,11 @@ fun PickleApp(
     topBar = {
       PickleTopBar(
         route = route,
-        pendingCount = state.requests.size,
+        inboxCount = state.requests.size,
+        inboxStatus = inboxFilters.status,
         connected = state.connected,
         onBack = { route = PickleRoute.Inbox.name },
-        onRefresh = onRefresh,
+        onRefresh = { onRefresh(inboxFilters.status) },
         onStartRealtime = onStartRealtime,
       )
     },
@@ -236,7 +285,8 @@ fun PickleApp(
           InboxPage(
             requests = state.requests,
             loading = state.loading,
-            onRefresh = onRefresh,
+            filters = inboxFilters,
+            onFiltersChange = ::setInboxFilters,
             onOpen = { request ->
               onSelect(request)
               route = PickleRoute.Detail.name
@@ -257,7 +307,8 @@ private enum class PickleRoute(val label: String) {
 @Composable
 private fun PickleTopBar(
   route: String,
-  pendingCount: Int,
+  inboxCount: Int,
+  inboxStatus: String,
   connected: Boolean?,
   onBack: () -> Unit,
   onRefresh: () -> Unit,
@@ -284,7 +335,7 @@ private fun PickleTopBar(
           fontWeight = FontWeight.SemiBold,
         )
         Text(
-          text = if (isDetail) "Structured handoff" else "$pendingCount pending",
+          text = if (isDetail) "Structured handoff" else "$inboxCount ${inboxStatusLabel(inboxStatus)}",
           style = MaterialTheme.typography.labelMedium,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -330,57 +381,72 @@ private fun PickleBottomBar(route: String, onNavigate: (PickleRoute) -> Unit) {
 @Composable
 private fun PickleMark(modifier: Modifier = Modifier) {
   Surface(
-    modifier = modifier.width(48.dp).height(42.dp),
+    modifier = modifier.width(40.dp).height(48.dp),
     shape = RoundedCornerShape(12.dp),
     color = Color(0xFFFFE18B),
     shadowElevation = 0.dp,
   ) {
-    Canvas(modifier = Modifier.fillMaxSize().padding(5.dp)) {
+    Canvas(modifier = Modifier.fillMaxSize().padding(4.dp)) {
       val dark = Color(0xFF1F4E38)
-      rotate(degrees = -15f, pivot = center) {
-        drawOval(
-          color = Color(0xFF2F7D58),
-          topLeft = Offset(size.width * 0.16f, size.height * 0.08f),
-          size = Size(size.width * 0.66f, size.height * 0.86f),
+      val body = Color(0xFF2F7D58)
+      val light = Color(0xFF7BCB62)
+      val cheek = Color(0xFFF37D5A)
+      rotate(degrees = -18f, pivot = center) {
+        val bodyW = size.width * 0.58f
+        val bodyH = size.height * 0.94f
+        val bodyLeft = (size.width - bodyW) / 2f
+        val bodyTop = (size.height - bodyH) / 2f
+        val bodyTopLeft = Offset(bodyLeft, bodyTop)
+        val bodySize = Size(bodyW, bodyH)
+        val bodyCorner = CornerRadius(bodyW / 2.4f, bodyW / 2.4f)
+
+        drawRoundRect(color = body, topLeft = bodyTopLeft, size = bodySize, cornerRadius = bodyCorner)
+
+        drawRoundRect(
+          color = light,
+          topLeft = Offset(bodyLeft + bodyW * 0.10f, bodyTop + bodyH * 0.08f),
+          size = Size(bodyW * 0.22f, bodyH * 0.84f),
+          cornerRadius = CornerRadius(bodyW * 0.11f, bodyW * 0.11f),
         )
-        drawOval(
-          color = Color(0xFF7BCB62),
-          topLeft = Offset(size.width * 0.25f, size.height * 0.16f),
-          size = Size(size.width * 0.48f, size.height * 0.70f),
-        )
-        drawPath(
-          path =
-            Path().apply {
-              moveTo(size.width * 0.42f, size.height * 0.18f)
-              cubicTo(size.width * 0.45f, size.height * 0.36f, size.width * 0.54f, size.height * 0.58f, size.width * 0.67f, size.height * 0.78f)
-            },
-          color = dark.copy(alpha = 0.55f),
-          style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round),
-        )
+
         listOf(
-          Offset(size.width * 0.40f, size.height * 0.36f),
-          Offset(size.width * 0.58f, size.height * 0.28f),
-          Offset(size.width * 0.54f, size.height * 0.56f),
-          Offset(size.width * 0.36f, size.height * 0.62f),
+          Offset(bodyLeft + bodyW * 0.74f, bodyTop + bodyH * 0.18f),
+          Offset(bodyLeft + bodyW * 0.50f, bodyTop + bodyH * 0.60f),
+          Offset(bodyLeft + bodyW * 0.76f, bodyTop + bodyH * 0.74f),
+          Offset(bodyLeft + bodyW * 0.34f, bodyTop + bodyH * 0.82f),
         ).forEach { spot ->
-          drawCircle(color = dark, radius = 2.2.dp.toPx(), center = spot)
+          drawCircle(color = dark.copy(alpha = 0.45f), radius = 1.3.dp.toPx(), center = spot)
         }
+
+        val cheekRadius = 2.4.dp.toPx()
+        drawCircle(color = cheek.copy(alpha = 0.42f), radius = cheekRadius,
+          center = Offset(bodyLeft + bodyW * 0.22f, bodyTop + bodyH * 0.40f))
+        drawCircle(color = cheek.copy(alpha = 0.42f), radius = cheekRadius,
+          center = Offset(bodyLeft + bodyW * 0.78f, bodyTop + bodyH * 0.40f))
+
+        val eyeRadius = 2.0.dp.toPx()
+        val sparkleRadius = 0.7.dp.toPx()
+        val eyeL = Offset(bodyLeft + bodyW * 0.34f, bodyTop + bodyH * 0.32f)
+        val eyeR = Offset(bodyLeft + bodyW * 0.66f, bodyTop + bodyH * 0.32f)
+        drawCircle(color = dark, radius = eyeRadius, center = eyeL)
+        drawCircle(color = dark, radius = eyeRadius, center = eyeR)
+        drawCircle(color = Color.White, radius = sparkleRadius,
+          center = Offset(eyeL.x + 0.6.dp.toPx(), eyeL.y - 0.6.dp.toPx()))
+        drawCircle(color = Color.White, radius = sparkleRadius,
+          center = Offset(eyeR.x + 0.6.dp.toPx(), eyeR.y - 0.6.dp.toPx()))
+
         val grin =
           Path().apply {
-            moveTo(size.width * 0.42f, size.height * 0.74f)
-            cubicTo(size.width * 0.49f, size.height * 0.82f, size.width * 0.60f, size.height * 0.80f, size.width * 0.67f, size.height * 0.70f)
+            moveTo(bodyLeft + bodyW * 0.26f, bodyTop + bodyH * 0.50f)
+            cubicTo(
+              bodyLeft + bodyW * 0.36f, bodyTop + bodyH * 0.66f,
+              bodyLeft + bodyW * 0.64f, bodyTop + bodyH * 0.66f,
+              bodyLeft + bodyW * 0.74f, bodyTop + bodyH * 0.50f,
+            )
           }
-        drawPath(grin, color = Color(0xFFFFF6D7), style = Stroke(width = 3.3.dp.toPx(), cap = StrokeCap.Round))
-        drawPath(grin, color = dark, style = Stroke(width = 1.3.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(grin, color = Color(0xFFFFF6D7), style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round))
+        drawPath(grin, color = dark, style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round))
       }
-      val partyHat =
-        Path().apply {
-          moveTo(size.width * 0.72f, size.height * 0.20f)
-          lineTo(size.width * 0.91f, size.height * 0.04f)
-          lineTo(size.width * 0.86f, size.height * 0.32f)
-          close()
-        }
-      drawPath(partyHat, color = Color(0xFFF37D5A))
     }
   }
 }
@@ -447,7 +513,7 @@ fun PickleAppPreview() {
               ),
             ),
         ),
-      onRefresh = {},
+      onRefresh = { _ -> },
       onSelect = {},
       onSaveSettings = {},
       onTestConnection = {},

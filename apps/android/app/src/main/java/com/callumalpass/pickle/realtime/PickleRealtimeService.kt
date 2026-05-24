@@ -178,16 +178,27 @@ class PickleRealtimeService : Service() {
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle(title)
         .setContentText(body)
-        .setContentIntent(mainPendingIntent())
+        .setContentIntent(mainPendingIntent(requestId))
         .setAutoCancel(true)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .build()
     manager.notify((requestId ?: System.currentTimeMillis().toString()).hashCode(), notification)
   }
 
-  private fun mainPendingIntent(): PendingIntent {
-    val intent = Intent(this, MainActivity::class.java)
-    return PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+  private fun mainPendingIntent(requestId: String? = null): PendingIntent {
+    val intent =
+      Intent(this, MainActivity::class.java)
+        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    val trimmedRequestId = requestId?.trim()?.takeIf { it.isNotBlank() }
+    if (trimmedRequestId != null) {
+      intent.putExtra(MainActivity.EXTRA_REQUEST_ID, trimmedRequestId)
+    }
+    return PendingIntent.getActivity(
+      this,
+      trimmedRequestId?.hashCode() ?: 0,
+      intent,
+      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
   }
 
   private fun ensureChannels() {

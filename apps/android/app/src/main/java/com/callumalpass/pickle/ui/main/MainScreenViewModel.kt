@@ -15,8 +15,8 @@ import kotlinx.serialization.json.JsonElement
 class MainScreenViewModel(private val repository: PickleRepository) : ViewModel() {
   val uiState: StateFlow<com.callumalpass.pickle.data.PickleUiState> = repository.state
 
-  fun refresh() {
-    viewModelScope.launch { repository.refresh() }
+  fun refresh(status: String = "pending") {
+    viewModelScope.launch { repository.refresh(status) }
   }
 
   fun testConnection() {
@@ -33,6 +33,10 @@ class MainScreenViewModel(private val repository: PickleRepository) : ViewModel(
 
   fun select(request: PickleRequest) {
     repository.select(request)
+  }
+
+  fun openRequest(id: String) {
+    viewModelScope.launch { repository.openRequest(id) }
   }
 
   fun loadAttachment(request: PickleRequest, attachment: PickleAttachment) {

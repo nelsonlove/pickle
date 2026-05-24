@@ -12,6 +12,7 @@ import kotlinx.serialization.json.put
 data class PickleUiState(
   val settings: ConnectionSettings = ConnectionSettings(),
   val requests: List<PickleRequest> = emptyList(),
+  val inboxStatus: String = "pending",
   val selected: PickleRequest? = null,
   val attachmentPreviews: Map<String, AttachmentPreview> = emptyMap(),
   val loading: Boolean = false,
@@ -80,11 +81,40 @@ class PickleRepository(context: Context, private val api: PickleApi = PickleApi(
 
   suspend fun refresh(status: String = "pending") {
     val settings = settingsStore.load()
-    mutableState.update { it.copy(loading = true, error = null, settings = settings) }
+    mutableState.update { it.copy(inboxStatus = status, loading = true, error = null, settings = settings) }
     try {
       val requests = api.inbox(settings, status)
       val selected = mutableState.value.selected?.let { current -> requests.firstOrNull { it.id == current.id } }
       mutableState.update { it.copy(requests = requests, selected = selected, loading = false, connected = true) }
+    } catch (error: Throwable) {
+      mutableState.update { it.copy(loading = false, connected = false, error = friendlyConnectionError(error)) }
+    }
+  }
+
+  suspend fun openRequest(id: String) {
+    val trimmedId = id.trim()
+    if (trimmedId.isEmpty()) return
+    val settings = settingsStore.load()
+    mutableState.update { it.copy(loading = true, selected = null, error = null, settings = settings) }
+    try {
+      val request = api.request(settings, trimmedId)
+      val bucket = runCatching { api.inbox(settings, request.status) }.getOrElse { emptyList() }
+      val requests =
+        if (bucket.any { it.id == request.id }) {
+          bucket
+        } else {
+          listOf(request) + bucket
+        }
+      mutableState.update {
+        it.copy(
+          requests = requests,
+          inboxStatus = request.status,
+          selected = request,
+          loading = false,
+          connected = true,
+          error = null,
+        )
+      }
     } catch (error: Throwable) {
       mutableState.update { it.copy(loading = false, connected = false, error = friendlyConnectionError(error)) }
     }
@@ -110,7 +140,7 @@ class PickleRepository(context: Context, private val api: PickleApi = PickleApi(
       val bytes = api.attachment(settings, request.id, attachment.id)
       val preview =
         when {
-          attachment.contentType == "text/plain" || attachment.contentType == "text/markdown" ->
+          attachment.isTextPreviewType() ->
             AttachmentPreview(text = bytes.toString(Charsets.UTF_8))
           attachment.contentType.startsWith("image/") ->
             AttachmentPreview(imageBytes = bytes)
@@ -151,8 +181,14 @@ class PickleRepository(context: Context, private val api: PickleApi = PickleApi(
           ),
         )
       mutableState.update { state ->
+        val requests =
+          if (state.inboxStatus == "pending") {
+            listOf(created) + state.requests.filterNot { it.id == created.id }
+          } else {
+            state.requests
+          }
         state.copy(
-          requests = listOf(created) + state.requests.filterNot { it.id == created.id },
+          requests = requests,
           selected = created,
           sending = false,
           connected = true,
@@ -181,8 +217,13 @@ class PickleRepository(context: Context, private val api: PickleApi = PickleApi(
     try {
       val updated = api.respond(settings, request.id, SubmitResponseRequest(responder = "callum", payload = payload))
       mutableState.update { state ->
-        val remaining = state.requests.filterNot { it.id == updated.id }
-        state.copy(requests = remaining, selected = null, sending = false, notice = successNotice, error = null)
+        val nextRequests =
+          if (state.inboxStatus == updated.status) {
+            listOf(updated) + state.requests.filterNot { it.id == updated.id }
+          } else {
+            state.requests.filterNot { it.id == updated.id }
+          }
+        state.copy(requests = nextRequests, selected = null, sending = false, notice = successNotice, error = null)
       }
       return true
     } catch (error: Throwable) {
@@ -210,3 +251,11 @@ internal fun dismissMessagePayload(): JsonElement =
   buildJsonObject {
     put("acknowledged", JsonPrimitive(true))
   }
+
+private fun PickleAttachment.isTextPreviewType(): Boolean {
+  val normalized = contentType.substringBefore(";").trim().lowercase()
+  return normalized.startsWith("text/") ||
+    normalized == "application/json" ||
+    normalized == "application/markdown" ||
+    filename.endsWith(".md", ignoreCase = true)
+}
