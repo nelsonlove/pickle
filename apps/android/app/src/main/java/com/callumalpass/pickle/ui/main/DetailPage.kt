@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -75,14 +76,18 @@ internal fun DetailPage(
           KindChip(request.kind, request.priority)
           TagRow(request.tags)
         }
-        Text(request.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        Text(
-          "${request.source} / ${formatTimestamp(request.createdAt)}",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (request.body.isNotBlank()) {
-          Text(request.body, style = MaterialTheme.typography.bodyLarge)
+        SelectionContainer {
+          Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(request.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+              "${request.source} / ${formatTimestamp(request.createdAt)}",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (request.body.isNotBlank()) {
+              Text(request.body, style = MaterialTheme.typography.bodyLarge)
+            }
+          }
         }
         LinkBlock(request.links)
         AttachmentBlock(request, attachmentPreviews, onLoadAttachment)
@@ -98,7 +103,9 @@ internal fun DetailPage(
       ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
           Text("Response", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-          Text(request.response.payload.toString(), style = MaterialTheme.typography.bodyMedium)
+          SelectionContainer {
+            Text(request.response.payload.toString(), style = MaterialTheme.typography.bodyMedium)
+          }
         }
       }
     } else if (request.kind == "message") {
@@ -152,8 +159,12 @@ private fun LinkBlock(links: List<PickleLink>) {
   if (links.isEmpty()) return
   Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Text("Links", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-    links.forEach { link ->
-      Text("${link.label}: ${link.url ?: link.path}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+    SelectionContainer {
+      Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        links.forEach { link ->
+          Text("${link.label}: ${link.url ?: link.path}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        }
+      }
     }
   }
 }
@@ -208,12 +219,14 @@ private fun AttachmentPreviewItem(attachment: PickleAttachment, preview: Attachm
             shape = RoundedCornerShape(6.dp),
             color = MaterialTheme.colorScheme.surface,
           ) {
-            Text(
-              preview.text,
-              modifier = Modifier.padding(10.dp),
-              style = MaterialTheme.typography.bodyMedium,
-              fontFamily = if (attachment.contentType == "text/plain") FontFamily.Monospace else FontFamily.Default,
-            )
+            SelectionContainer {
+              Text(
+                preview.text,
+                modifier = Modifier.padding(10.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = if (attachment.contentType == "text/plain") FontFamily.Monospace else FontFamily.Default,
+              )
+            }
           }
         preview.imageBytes != null -> {
           val bitmap =
