@@ -1,0 +1,63 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # mdbase-rs is a local path dependency (../mdbase-rs). Pin it so upstream
+  # changes can't silently break these builds.
+  MDBASE_REF: 4fa54c44c7c20639a8998f612dacdb4848ce5bfa
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout pickle
+        uses: actions/checkout@v4
+        with:
+          path: pickle
+
+      - name: Checkout mdbase-rs (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: callumalpass/mdbase-rs
+          ref: ${{ env.MDBASE_REF }}
+          path: mdbase-rs
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        working-directory: pickle
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        working-directory: pickle
+        run: |
+          NAME="pickle-${{ matrix.target }}"
+          tar -czf "$NAME.tar.gz" -C "target/${{ matrix.target }}/release" pickle
+          shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            pickle/pickle-${{ matrix.target }}.tar.gz
+            pickle/pickle-${{ matrix.target }}.tar.gz.sha256
