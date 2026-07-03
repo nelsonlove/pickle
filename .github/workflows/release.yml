@@ -55,9 +55,25 @@ jobs:
           tar -czf "$NAME.tar.gz" -C "target/${{ matrix.target }}/release" pickle
           shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: pickle-${{ matrix.target }}
+          path: |
             pickle/pickle-${{ matrix.target }}.tar.gz
             pickle/pickle-${{ matrix.target }}.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
